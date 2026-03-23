@@ -1,0 +1,22 @@
+name: Continuous Deployment - Python
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Select which environment will use to deploy zip.
+        required: true
+        type: environment
+      artifact-path:
+        description: Changes the default obtained by 'latest' tag from selected branch.
+        required: false
+        type: string
+
+jobs:
+  continuous-deployment:
+    uses: dx-developer-platform/az-wf-github-core-workflows/.github/workflows/continuous-deployment-python.yml@v1
+    with:
+      environment: ${{inputs.environment}}
+      artifact-path: ${{inputs.artifact-path}}
+    secrets:
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}

@@ -1,0 +1,26 @@
+name: Continuous Integration
+on:
+  # Runs when there is a push to the specified branches. If the commit only affects files in 'paths-ignore', the workflow will not run.
+  push:
+    branches:
+      - "feature/**"
+    paths-ignore: 
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '**.txt'
+
+  # Allows manual execution of the workflow from the GitHub UI
+  workflow_dispatch:
+
+# JOBS - Defines the jobs that will be executed
+jobs:
+  continuous-integration:
+    uses: dx-developer-platform/az-wf-github-core-workflows/.github/workflows/continuous-integration-python.yml@v1
+    secrets: 
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  continuous-delivery:
+    needs: continuous-integration
+    uses: dx-developer-platform/az-wf-github-core-workflows/.github/workflows/continuous-delivery-python.yml@v1
+    secrets:
+      JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
