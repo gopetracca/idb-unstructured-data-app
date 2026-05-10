@@ -1,0 +1,1 @@
+"""Azure adapters unit tests."""

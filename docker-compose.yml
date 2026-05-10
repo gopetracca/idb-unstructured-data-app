@@ -1,0 +1,110 @@
+services:
+
+  app:
+    container_name: ea-ai-nonstructured-data-app
+    # Will use this image name:tag when building
+    image: ea-ai-nonstructured-data-app:dev
+    platform: linux/amd64
+    build:
+      context: .
+      args:
+        INSTALL_IADB_CA: ${INSTALL_IADB_CA:-false}
+        IADB_ROOT_CA_FILE: ${IADB_ROOT_CA_FILE:-.docker/empty-iadb-root-ca.crt}
+      # target: dev
+    env_file:
+      - .env
+    environment:
+      EXAMPLE_ENV: some_value
+      # SQL Server (override host to use Docker service name)
+      SQL_SERVER_ENABLED: "true"
+    restart: always
+    ports:
+      - "7071:80"
+    # volumes:
+    #   - .:/app:Z
+    depends_on:
+      azurite:
+        condition: service_started
+      sqlserver:
+        condition: service_healthy
+      sqlserver-init:
+        condition: service_completed_successfully
+      sqlserver-migrate:
+        condition: service_completed_successfully
+
+  azurite:
+    container_name: azurite
+    image: mcr.microsoft.com/azure-storage/azurite
+    restart: always
+    ports:
+      - "10000:10000"  # Blob Storage
+      - "10001:10001"  # Queue Storage
+      - "10002:10002"  # Table Storage
+    volumes:
+      - azurite-data:/data
+    command: "azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --loose --skipApiVersionCheck"
+
+  sqlserver:
+    container_name: sqlserver
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: always
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "YourStrong!Passw0rd" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # One-shot service to create the application database
+  sqlserver-init:
+    container_name: sqlserver-init
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    volumes:
+      - ./scripts/init-sqlserver.sql:/tmp/init.sql:ro
+    entrypoint: /opt/mssql-tools18/bin/sqlcmd
+    command: -S sqlserver -U sa -P "YourStrong!Passw0rd" -C -i /tmp/init.sql
+    restart: "no"
+
+  # One-shot service to run Alembic migrations after database bootstrap
+  sqlserver-migrate:
+    container_name: sqlserver-migrate
+    image: ea-ai-nonstructured-data-app:dev
+    platform: linux/amd64
+    build:
+      context: .
+      args:
+        INSTALL_IADB_CA: ${INSTALL_IADB_CA:-false}
+        IADB_ROOT_CA_FILE: ${IADB_ROOT_CA_FILE:-.docker/empty-iadb-root-ca.crt}
+    env_file:
+      - .env
+    volumes:
+      - ./scripts/migrate.py:/tmp/scripts/migrate.py:ro
+      - ./alembic.ini:/tmp/alembic.ini:ro
+      - ./src:/src:ro
+    # environment:
+    #   SQL_SERVER_ENABLED: "true"
+    #   SQL_SERVER_DATABASE_URL: "mssql+aioodbc://sa:YourStrong!Passw0rd@sqlserver:1433/db-np-d-aimvp?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      sqlserver-init:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'set -eu; echo "[sqlserver-migrate] running upgrade head"; uv run --no-dev python /tmp/scripts/migrate.py upgrade head; echo "[sqlserver-migrate] running history --verbose"; uv run --no-dev python /tmp/scripts/migrate.py history --verbose;'
+    restart: "no"
+
+volumes:
+  azurite-data:
+  sqlserver-data:
