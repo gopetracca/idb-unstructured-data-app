@@ -131,7 +131,6 @@ class FileTable(Base):
 
     def update_from_file_index(self, fi: "FileIndex") -> None:
         """Update FileTable columns from a FileIndex entity."""
-        exclude = self._UPDATE_EXCLUDE | (self._FILE_TABLE_FIELDS - self._FILE_TABLE_FIELDS)
         data = fi.model_dump(include=self._FILE_TABLE_FIELDS, exclude=self._UPDATE_EXCLUDE)
         for field, value in data.items():
             setattr(self, field, value)
