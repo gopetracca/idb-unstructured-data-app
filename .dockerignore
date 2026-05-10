@@ -1,0 +1,13 @@
+local.settings.json
+.claude
+.devcontainer
+.venv
+.vscode
+docs
+htmlcov
+infra
+playground
+scripts
+tests
+.env*
+.python-version

@@ -1,0 +1,41 @@
+{
+  "version": "2.0",
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    },
+    "logLevel": {
+      "Default": "Information",
+      "Host": "Warning",
+      "Host.Function.Console": "Information",
+      "Function": "Information",
+      "Azure.Core": "Error",
+      "Microsoft.Azure.WebJobs.Extensions.Storage": "Warning",
+      "Microsoft.Azure.WebJobs.Extensions.Storage.Common.Listeners.QueueListener": "Warning",
+      "Microsoft.Azure.WebJobs.Script.Diagnostics.HealthChecks": "Warning"
+    },
+    "console": {
+      "isEnabled": true,
+      "DisableColors": true
+    }
+  },
+  "extensions": {
+    "http": {
+      "routePrefix": ""
+    },
+    "queues": {
+      "messageEncoding": "base64",
+      "maxPollingInterval": "00:00:05",
+      "visibilityTimeout": "00:05:00",
+      "batchSize": 4,
+      "maxDequeueCount": 2
+    }
+  },
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  }
+}
