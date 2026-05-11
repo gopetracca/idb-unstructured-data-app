@@ -2,8 +2,8 @@ name: Continuous Integration
 on:
   # Runs when there is a push to the specified branches. If the commit only affects files in 'paths-ignore', the workflow will not run.
   push:
-    branches:
-      - "feature/**"
+    # branches:
+    #   - "feature/**"
     paths-ignore: 
       - 'docs/**'
       - '.gitignore'

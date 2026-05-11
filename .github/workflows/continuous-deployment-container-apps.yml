@@ -49,6 +49,6 @@ jobs:
       - name: Deploy to Azure Container Apps
         uses: azure/container-apps-deploy-action@v2
         with:
-          containerAppName: ${{ vars.CONTAINER_APP_NAME }}
-          resourceGroup: ${{ vars.RESOURCE_GROUP }}
+          containerAppName: "ca-np-d-aimvp-unstructdata" # ${{ vars.CONTAINER_APP_NAME }}
+          resourceGroup: "rg-np-d-aimvp" # ${{ vars.RESOURCE_GROUP }}
           imageToDeploy: ${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:${{ inputs.image-tag }}
