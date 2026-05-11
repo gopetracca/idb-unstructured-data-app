@@ -10,6 +10,6 @@ on:
   workflow_dispatch:
 jobs:
   continuous-delivery:
-    uses: dx-developer-platform/az-wf-github-core-workflows/.github/workflows/continuous-delivery-python.yml@v1
+    uses: ./.github/workflows/container-app-delivery.yml
     secrets:
       JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}

@@ -1,0 +1,22 @@
+name: Container Apps Delivery
+
+on:
+  # Build and push sha-<short> tag on every merge to main
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths-ignore:
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '**.txt'
+
+  # Allow manual trigger (e.g. rebuild a specific commit)
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    uses: ./.github/workflows/container-build-acr.yml
+    secrets: inherit

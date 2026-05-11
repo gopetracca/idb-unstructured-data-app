@@ -1,0 +1,58 @@
+name: Container Build & Push to ACR
+
+on:
+  workflow_call:
+    inputs:
+      acr-name:
+        description: Azure Container Registry name
+        required: false
+        type: string
+        default: acrnpdaimvpshared
+      image-name:
+        description: Image name (without registry prefix)
+        required: false
+        type: string
+        default: aimvp-unnstructured-data-app
+      target:
+        description: Dockerfile build target stage
+        required: false
+        type: string
+        default: runtime
+
+jobs:
+  acr-build:
+    name: ACR Server-side Build
+    runs-on: ubuntu-latest
+    environment: continuous-delivery
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: dx-developer-platform/github-wf-core-azure-login-action@v1
+        with:
+          client-id: ${{ vars.CLIENT_ID }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHA_SHORT="${GITHUB_SHA::7}"
+          TAGS="sha-${SHA_SHORT}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAGS="${TAGS},${GITHUB_REF_NAME},latest"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Computed tags: ${TAGS}"
+
+      - name: Build and push to ACR
+        run: |
+          chmod +x scripts/acr_build.sh
+          scripts/acr_build.sh \
+            --registry "${{ inputs.acr-name }}" \
+            --image    "${{ inputs.image-name }}" \
+            --target   "${{ inputs.target }}" \
+            --tags     "${{ steps.tags.outputs.tags }}"
