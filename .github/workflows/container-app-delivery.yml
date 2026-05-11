@@ -1,6 +1,9 @@
 name: Container Apps Delivery
 
 on:
+  # Called as a reusable from continuous-integration.yml
+  workflow_call:
+
   # Build and push sha-<short> tag on every merge to main
   push:
     branches:
