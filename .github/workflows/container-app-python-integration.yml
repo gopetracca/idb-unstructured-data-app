@@ -58,6 +58,6 @@ jobs:
         sonar-project-key: ${{ vars.PROJECT_KEY }}
         sonar-project-name: ${{ vars.PROJECT_NAME }}
 
-  docker-build:
-    needs: python-ci
-    uses: ./.github/workflows/container-docker-build.yml
+  # docker-build:
+  #   needs: python-ci
+  #   uses: ./.github/workflows/container-docker-build.yml
