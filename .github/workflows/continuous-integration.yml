@@ -22,5 +22,4 @@ jobs:
   continuous-delivery:
     needs: continuous-integration
     uses: ./.github/workflows/container-app-delivery.yml
-    secrets:
-      JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+    secrets: inherit
