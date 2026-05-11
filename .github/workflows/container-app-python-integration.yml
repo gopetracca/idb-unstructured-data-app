@@ -1,0 +1,52 @@
+name: Container Apps Python Integration
+
+on:
+
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: Python version for uv / test runner
+        type: string
+        default: '3.12'
+      test-command:
+        description: Command passed to 'uv run' (e.g. "pytest -m unit --no-cov")
+        type: string
+        default: 'pytest -m unit --no-cov'
+    secrets:
+        SONAR_TOKEN:
+          required: true
+
+jobs:
+  python-ci:
+    name: Python Continuous Integration
+    runs-on: ubuntu-latest
+    environment: continuous-integration
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Shallow clones should be disabled for better analysis
+  
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install dependencies
+      run: uv sync --frozen
+
+    - name: Run unit tests
+      run: uv run ${{ inputs.test-command }}
+    
+    - name: Run SonarQube Scan
+      uses: dx-developer-platform/github-wf-core-sonarqube-action/scan-generic@v1
+      with:
+        sonar-token: ${{ secrets.SONAR_TOKEN }}
+        sonar-project-key: ${{ vars.PROJECT_KEY }}
+        sonar-project-name: ${{ vars.PROJECT_NAME }}
+
+  docker-build:
+    needs: python-ci
+    uses: ./.github/workflows/container-docker-build.yml
