@@ -2,7 +2,7 @@ name: Container Apps Python Integration
 
 on:
 
-  workflow_dispatch:
+  workflow_call:
     inputs:
       python-version:
         description: Python version for uv / test runner
@@ -13,8 +13,19 @@ on:
         type: string
         default: 'pytest -m unit --no-cov'
     secrets:
-        SONAR_TOKEN:
-          required: true
+      SONAR_TOKEN:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: Python version for uv / test runner
+        type: string
+        default: '3.12'
+      test-command:
+        description: Command passed to 'uv run' (e.g. "pytest -m unit --no-cov")
+        type: string
+        default: 'pytest -m unit --no-cov'
 
 jobs:
   python-ci:
