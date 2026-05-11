@@ -1,0 +1,54 @@
+name: Container Apps Deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment (e.g. development, staging, production)
+        required: true
+        type: string
+      acr-name:
+        description: Azure Container Registry name
+        required: false
+        type: string
+        default: acrnpdaimvpshared
+      image-name:
+        description: Image name (without registry prefix)
+        required: false
+        type: string
+        default: aimvp-unnstructured-data-app
+      image-tag:
+        description: 'Image tag to deploy (e.g. sha-7685b57, v1.2.3, latest)'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy Container App Revision
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Azure Login
+        uses: dx-developer-platform/github-wf-core-azure-login-action@v1
+        with:
+          environment: ${{ inputs.environment }}
+          client-id: ${{ vars.CLIENT_ID }}
+          client-id-prd: ${{ vars.CLIENT_ID_PRD }}
+          client-id-stg: ${{ vars.CLIENT_ID_STG }}
+          client-id-tst: ${{ vars.CLIENT_ID_TST }}
+          client-id-qa: ${{ vars.CLIENT_ID_QA }}
+          client-id-dev: ${{ vars.CLIENT_ID_DEV }}
+          client-secret: ${{ secrets.CLIENT_SECRET }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+
+      - name: Deploy to Azure Container Apps
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          containerAppName: ${{ vars.CONTAINER_APP_NAME }}
+          resourceGroup: ${{ vars.RESOURCE_GROUP }}
+          imageToDeploy: ${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:${{ inputs.image-tag }}
