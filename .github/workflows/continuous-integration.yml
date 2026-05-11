@@ -23,3 +23,5 @@ jobs:
     needs: continuous-integration
     uses: ./.github/workflows/container-app-delivery.yml
     secrets: inherit
+    with:
+      environment: development

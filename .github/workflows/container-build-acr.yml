@@ -18,12 +18,17 @@ on:
         required: false
         type: string
         default: runtime
+      environment:
+        description: GitHub Environment to run in (e.g. development, staging, production)
+        required: false
+        type: string
+        default: development
 
 jobs:
   acr-build:
     name: ACR Server-side Build
     runs-on: ubuntu-latest
-    environment: continuous-delivery
+    environment: ${{ inputs.environment }}
     permissions:
       id-token: write
       contents: read

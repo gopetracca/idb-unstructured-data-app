@@ -11,5 +11,6 @@ on:
 jobs:
   continuous-delivery:
     uses: ./.github/workflows/container-app-delivery.yml
-    secrets:
-      JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+    secrets: inherit
+    with:
+      environment: development
