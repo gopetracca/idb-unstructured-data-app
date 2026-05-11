@@ -17,23 +17,12 @@ on:
   push:
     branches:
       - "feature/**"
-    inputs:
-      environment:
-        description: Target environment
-        required: true
-        type: environment
-        default: development
-      image-tag:
-        description: 'Image tag to deploy (e.g. sha-7685b57, v1.2.3, latest)'
-        required: true
-        type: string
-        default: latest
 
 
 jobs:
   continuous-deployment:
     uses: ./.github/workflows/continuous-deployment-container-apps.yml
     with:
-      environment: ${{ inputs.environment }}
-      image-tag: ${{ inputs.image-tag }}
+      environment: "development" # ${{ inputs.environment }}
+      image-tag: "latest" # ${{ inputs.image-tag }}
     secrets: inherit
