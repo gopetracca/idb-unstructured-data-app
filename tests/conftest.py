@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # integration tests without needing explicit imports in each conftest.
 pytest_plugins = [
     "tests.testcontainers_fixtures",
-    "tests.integration.infrastructure.sqlserver_entity_factories",
+    # "tests.integration.infrastructure.sqlserver_entity_factories",
 ]
 
 # Load .env file before any other imports
