@@ -8,21 +8,15 @@ on:
         required: true
         type: environment
       image-tag:
-        description: 'Image tag to deploy (e.g. sha-7685b57, v1.2.3, latest)'
+        description: 'Immutable image tag to deploy, e.g. sha-7685b57 or v1.2.3'
         required: true
         type: string
-        default: latest
-
-  # TMP FOR DEBUG
-  push:
-    branches:
-      - "feature/**"
 
 
 jobs:
   continuous-deployment:
     uses: ./.github/workflows/continuous-deployment-container-apps.yml
     with:
-      environment: "development" # ${{ inputs.environment }}
-      image-tag: "latest" # ${{ inputs.image-tag }}
+      environment: ${{ inputs.environment }}
+      image-tag: ${{ inputs.image-tag }}
     secrets: inherit

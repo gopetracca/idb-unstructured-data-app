@@ -18,7 +18,7 @@ on:
         type: string
         default: aimvp-unnstructured-data-app
       image-tag:
-        description: 'Image tag to deploy (e.g. sha-7685b57, v1.2.3, latest)'
+        description: 'Immutable image tag to deploy, e.g. sha-7685b57 or v1.2.3'
         required: true
         type: string
 
@@ -32,6 +32,8 @@ jobs:
       contents: read
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Azure Login
         uses: dx-developer-platform/github-wf-core-azure-login-action@v1
         with:
@@ -46,9 +48,19 @@ jobs:
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
           tenant-id: ${{ vars.TENANT_ID }}
 
-      - name: Deploy to Azure Container Apps
-        uses: azure/container-apps-deploy-action@v2
-        with:
-          containerAppName: "ca-np-d-aimvp-unstructdata" # ${{ vars.CONTAINER_APP_NAME }}
-          resourceGroup: "rg-np-d-aimvp" # ${{ vars.RESOURCE_GROUP }}
-          imageToDeploy: ${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:${{ inputs.image-tag }}
+      - name: Deploy Container App revision
+        shell: bash
+        env:
+          CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
+          IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          chmod +x scripts/deploy_container_app.sh
+          scripts/deploy_container_app.sh \
+            --app "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --acr "$ACR_NAME" \
+            --image "$IMAGE_NAME" \
+            --tag "$IMAGE_TAG"
