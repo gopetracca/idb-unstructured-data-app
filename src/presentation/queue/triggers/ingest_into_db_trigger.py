@@ -45,11 +45,11 @@ async def _handle_ingest_into_db_trigger(
 
     Loads embeddings from blob storage and ingests them into the vector database.
     """
-    logger.info("[ingest_into_db_trigger] START - received message")
+    logger.debug("ingest_into_db_trigger received message")
 
     try:
         raw_body = msg.get_body().decode("utf-8")
-        logger.info(f"[ingest_into_db_trigger] Raw message: {raw_body[:500]}")
+        logger.debug("ingest_into_db_trigger raw message: %s", raw_body[:500])
 
         from src.application.dto.ingestion_dto import IngestDocumentsInput, IngestionDocument
         from src.config.settings import get_settings
@@ -57,9 +57,11 @@ async def _handle_ingest_into_db_trigger(
 
         settings = get_settings()
 
-        logger.info(
-            f"[ingest_into_db_trigger] Processing document: file_id={envelope.file_id}, "
-            f"tenant_id={envelope.tenant_id}, correlation_id={envelope.correlation_id}"
+        logger.debug(
+            "ingest_into_db_trigger processing: file_id=%s, tenant_id=%s, correlation_id=%s",
+            envelope.file_id,
+            envelope.tenant_id,
+            envelope.correlation_id,
         )
 
         payload = envelope.payload or {}
@@ -73,11 +75,6 @@ async def _handle_ingest_into_db_trigger(
         )
 
         async def execute() -> None:
-            logger.info(
-                f"[ingest_into_db_trigger] Loading embeddings from container={source_container}, "
-                f"file_id={envelope.file_id}"
-            )
-
             embeddings = await _load_embeddings_for_file(
                 blob_client=blob_client,
                 container=source_container,
@@ -87,12 +84,16 @@ async def _handle_ingest_into_db_trigger(
 
             if not embeddings:
                 logger.warning(
-                    f"[ingest_into_db_trigger] No embeddings found for file_id={envelope.file_id}"
+                    "No embeddings found for file_id=%s in container=%s",
+                    envelope.file_id,
+                    source_container,
                 )
                 return
 
-            logger.info(
-                f"[ingest_into_db_trigger] Loaded {len(embeddings)} embeddings for file_id={envelope.file_id}"
+            logger.debug(
+                "Loaded %d embeddings for file_id=%s",
+                len(embeddings),
+                envelope.file_id,
             )
 
             documents = [
@@ -114,17 +115,21 @@ async def _handle_ingest_into_db_trigger(
                 correlation_id=envelope.correlation_id,
             )
 
-            logger.info(
-                f"[ingest_into_db_trigger] Executing use case for file_id={envelope.file_id}, "
-                f"collection={collection_name}, document_count={len(documents)}"
-            )
-
             result = await ingest_use_case.execute(input_dto)
 
+            logger.debug(
+                "ingest_into_db_trigger result: file_id=%s, collection=%s, successful=%d, failed=%d",
+                envelope.file_id,
+                collection_name,
+                result.successful,
+                result.failed,
+            )
             logger.info(
-                f"[ingest_into_db_trigger] Ingestion completed: file_id={envelope.file_id}, "
-                f"collection={collection_name}, successful={result.successful}, "
-                f"failed={result.failed}"
+                "ingest_into_db completed: file_id=%s, collection=%s, ok=%d, failed=%d",
+                envelope.file_id,
+                collection_name,
+                result.successful,
+                result.failed,
             )
 
             if result.failed == 0:
@@ -145,15 +150,7 @@ async def _handle_ingest_into_db_trigger(
             operation_name="ingest_into_db",
         )
 
-        logger.info(
-            f"[ingest_into_db_trigger] COMPLETED successfully for file_id={envelope.file_id}"
-        )
-
-    except Exception as e:
-        error_msg = (
-            f"[ingest_into_db_trigger] FAILED with error: {type(e).__name__}: {str(e)}"
-        )
-        logger.error(error_msg, exc_info=True)
+    except Exception:
         raise
     finally:
         # Shared clients are closed on host shutdown in function_app.py.
@@ -195,7 +192,7 @@ async def _load_embeddings_for_file(
             embeddings.append(embedding)
         except Exception as e:
             logger.warning(
-                f"[ingest_into_db_trigger] Failed to load embedding {blob['name']}: {e}"
+                "Failed to load embedding %s: %s", blob["name"], e
             )
 
     return embeddings

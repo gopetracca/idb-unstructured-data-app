@@ -31,5 +31,5 @@ def parse_queue_message(raw_content: str) -> QueueMessageEnvelope:
     except ValueError:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error parsing queue message: {e}")
+        logger.error("Unexpected error parsing queue message: %s", e, exc_info=True)
         raise ValueError(f"Failed to parse queue message: {e}") from e

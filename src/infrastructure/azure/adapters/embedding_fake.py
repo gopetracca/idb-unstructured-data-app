@@ -98,7 +98,7 @@ class FakeEmbeddings(EmbeddingPort):
                 )
             )
 
-        logger.info(f"Generated {len(results)} fake embeddings using {model}")
+            logger.debug("Generated %d fake embeddings using %s", len(results), model)
         return results
 
     def _generate_deterministic_vector(self, text: str, dimension: int) -> list[float]:

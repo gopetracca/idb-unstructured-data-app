@@ -73,7 +73,7 @@ class FakeChunker(ChunkerPort):
             text_length = len(text)
 
             if text_length == 0:
-                logger.warning(f"Empty text provided for chunking: file_id={file_id}")
+                logger.warning("Empty text provided for chunking: file_id=%s", file_id)
                 return chunks
 
             # Simple character-based chunking with overlap

@@ -143,7 +143,7 @@ class FakeDocumentIntelligenceAdapter(DocumentIntelligencePort):
         except UnsupportedFormatError:
             raise
         except Exception as e:
-            logger.error(f"Fake adapter failed: file_id={file_id}, error={str(e)}")
+            logger.error("Fake adapter failed: file_id=%s, error=%s", file_id, e, exc_info=True)
             raise DocumentProcessingError(
                 message=f"Fake extraction failed: {str(e)}",
                 file_id=file_id,

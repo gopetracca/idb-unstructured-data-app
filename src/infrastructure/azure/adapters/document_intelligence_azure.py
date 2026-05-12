@@ -85,9 +85,11 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             UnsupportedFormatError: If content_type is not supported
             DocumentProcessingError: If extraction fails
         """
-        logger.info(
-            f"Azure adapter analyzing document: file_id={file_id}, "
-            f"content_type={content_type}, size={len(document_content)} bytes"
+        logger.debug(
+            "Analyzing document: file_id=%s, content_type=%s, size=%d bytes",
+            file_id,
+            content_type,
+            len(document_content),
         )
 
         # Validate content type
@@ -110,8 +112,11 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
 
         except HttpResponseError as e:
             logger.error(
-                f"Azure Document Intelligence error: file_id={file_id}, "
-                f"status={e.status_code}, message={e.message}"
+                "Azure Document Intelligence error: file_id=%s, status=%s, message=%s",
+                file_id,
+                e.status_code,
+                e.message,
+                exc_info=True,
             )
             raise DocumentProcessingError(
                 message=f"Azure Document Intelligence failed: {e.message}",
@@ -122,8 +127,10 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
 
         except Exception as e:
             logger.error(
-                f"Unexpected error during document analysis: file_id={file_id}, "
-                f"error={str(e)}"
+                "Unexpected error during document analysis: file_id=%s, error=%s",
+                file_id,
+                e,
+                exc_info=True,
             )
             raise DocumentProcessingError(
                 message=f"Document analysis failed: {str(e)}",
@@ -216,10 +223,12 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             api_version=result.api_version or self._settings.api_version,
         )
 
-        logger.info(
-            f"Document analysis mapped: file_id={file_id}, "
-            f"pages={len(pages)}, words={total_word_count}, "
-            f"confidence={confidence:.4f}"
+        logger.debug(
+            "Document analysis mapped: file_id=%s, pages=%d, words=%d, confidence=%.4f",
+            file_id,
+            len(pages),
+            total_word_count,
+            confidence,
         )
 
         return MarkdownOutput(

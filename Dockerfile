@@ -19,7 +19,8 @@ ARG IADB_ROOT_CA_FILE=.docker/empty-iadb-root-ca.crt
 
 ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
     AzureFunctionsJobHost__Logging__Console__IsEnabled=true \
-    AzureFunctionsJobHost__Logging__Console__DisableColors=true
+    AzureFunctionsJobHost__Logging__Console__DisableColors=true \
+    PYTHONUNBUFFERED=1
 
 # Install Datadog serverless-init
 COPY --from=dd_init /datadog-init /app/datadog-init

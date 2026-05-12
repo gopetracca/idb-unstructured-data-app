@@ -176,7 +176,7 @@ class VectorizeChunksUseCase:
                         embedded_count += 1
 
                 except Exception as e:
-                    logger.error(f"Batch embedding failed: {str(e)}", exc_info=True)
+                    logger.error("Batch embedding failed: %s", e, exc_info=True)
                     # Mark chunks as failed
                     for chunk in batch_chunks:
                         await self._chunk_index_repository.mark_failed(
@@ -319,7 +319,7 @@ class VectorizeChunksUseCase:
                 chunk = Chunk.model_validate(chunk_data)
                 chunks.append(chunk)
             except Exception as e:
-                logger.warning(f"Failed to load chunk {chunk_index.chunk_id}: {e}")
+                logger.warning("Failed to load chunk %s: %s", chunk_index.chunk_id, e)
         return chunks
 
     async def _process_batch(

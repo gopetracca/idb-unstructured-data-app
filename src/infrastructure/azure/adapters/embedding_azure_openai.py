@@ -123,7 +123,7 @@ class AzureOpenAIEmbeddings(EmbeddingPort):
                         )
                     )
 
-                logger.info(f"Generated {len(results)} embeddings using {model}")
+                logger.debug("Generated %d embeddings using %s", len(results), model)
                 return results
 
             except OpenAIRateLimitError as e:
@@ -135,14 +135,16 @@ class AzureOpenAIEmbeddings(EmbeddingPort):
                     ) from e
 
                 logger.warning(
-                    f"Rate limit hit, retrying in {delay}s "
-                    f"(attempt {retries}/{self._settings.max_retries})"
+                    "Rate limit hit, retrying in %ss (attempt %d/%d)",
+                    delay,
+                    retries,
+                    self._settings.max_retries,
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self._settings.retry_delay_max)
 
             except Exception as e:
-                logger.error(f"Embedding generation failed: {str(e)}", exc_info=True)
+                logger.error("Embedding generation failed: %s", e, exc_info=True)
                 raise EmbeddingError(
                     message=f"Failed to generate embeddings: {str(e)}",
                     model=model,
