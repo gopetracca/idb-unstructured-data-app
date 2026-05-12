@@ -30,10 +30,12 @@ async def with_error_handling(
         return await operation()
     except Exception as e:
         logger.error(
-            f"{operation_name} failed: file_id={envelope.file_id}, "
-            f"tenant_id={envelope.tenant_id}, "
-            f"correlation_id={envelope.correlation_id}, "
-            f"error={str(e)}",
+            "%s failed: file_id=%s, tenant_id=%s, correlation_id=%s, error=%s",
+            operation_name,
+            envelope.file_id,
+            envelope.tenant_id,
+            envelope.correlation_id,
+            e,
             exc_info=True,
         )
 
@@ -46,8 +48,9 @@ async def with_error_handling(
             )
         except Exception as status_error:
             logger.error(
-                f"Failed to update pipeline state: file_id={envelope.file_id}, "
-                f"error={status_error}"
+                "Failed to update pipeline state: file_id=%s, error=%s",
+                envelope.file_id,
+                status_error,
             )
 
         # Re-raise for Azure Functions retry logic

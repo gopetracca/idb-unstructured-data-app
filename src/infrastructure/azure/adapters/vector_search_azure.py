@@ -253,20 +253,20 @@ class AzureAISearchAdapter(VectorDatabasePort):
 
             await self._client_wrapper.index_client.create_or_update_index(index)
 
-            logger.info(f"Successfully created index: {index_name}")
+            logger.info("Successfully created index: %s", index_name)
             return True
 
         except ValueError:
             raise  # Validation errors (missing/unknown document_type) bubble up as-is
         except ResourceNotFoundError as e:
-            logger.error(f"Index creation failed - resource not found: {e}")
+            logger.error("Index creation failed - resource not found: %s", e, exc_info=True)
             raise VectorDatabaseError(
                 f"Failed to create index '{index_name}': {e}",
                 index_name=index_name,
                 operation="create_index",
             )
         except Exception as e:
-            logger.error(f"Failed to create index '{index_name}': {e}", exc_info=True)
+            logger.error("Failed to create index '%s': %s", index_name, e, exc_info=True)
             raise VectorDatabaseError(
                 f"Failed to create index '{index_name}': {e}",
                 index_name=index_name,
@@ -460,10 +460,10 @@ class AzureAISearchAdapter(VectorDatabasePort):
             successful = all(r.succeeded for r in result)
 
             if successful:
-                logger.info(f"Successfully deleted {len(document_ids)} documents")
+                logger.info("Successfully deleted %d documents", len(document_ids))
             else:
                 failed = [r.key for r in result if not r.succeeded]
-                logger.warning(f"Failed to delete {len(failed)} documents: {failed[:5]}")
+                logger.warning("Failed to delete %d documents: %s", len(failed), failed[:5])
 
             return successful
 
@@ -503,7 +503,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
         try:
             client = self._client_wrapper.get_search_client(index_name)
 
-            logger.info(f"Deleting all documents for file_id '{file_id}' from '{index_name}'")
+            logger.info("Deleting all documents for file_id '%s' from '%s'", file_id, index_name)
 
             # Search for all documents with this file_id
             results = await client.search(
@@ -516,13 +516,13 @@ class AzureAISearchAdapter(VectorDatabasePort):
                 doc_ids.append(r["id"])
 
             if not doc_ids:
-                logger.info(f"No documents found for file_id '{file_id}'")
+                logger.info("No documents found for file_id '%s'", file_id)
                 return 0
 
             # Delete documents
             await self.delete_documents(index_name, doc_ids)
 
-            logger.info(f"Deleted {len(doc_ids)} documents for file_id '{file_id}'")
+            logger.info("Deleted %d documents for file_id '%s'", len(doc_ids), file_id)
             return len(doc_ids)
 
         except IndexNotFoundError:
@@ -563,7 +563,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             VectorDatabaseError: If update operation fails
         """
         if not metadata_updates:
-            logger.info(f"No metadata updates provided for file_id '{file_id}', skipping")
+            logger.info("No metadata updates provided for file_id '%s', skipping", file_id)
             return 0
 
         try:
@@ -584,7 +584,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             chunks = [chunk async for chunk in results]
 
             if not chunks:
-                logger.info(f"No chunks found for file_id '{file_id}'")
+                logger.info("No chunks found for file_id '%s'", file_id)
                 return 0
 
             # Merge updates into each chunk's metadata, preserving chunk-level fields.
@@ -823,7 +823,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             return None
 
         filter_string = " and ".join(filter_parts)
-        logger.debug(f"Built OData filter string: {filter_string}")
+        logger.debug("Built OData filter string: %s", filter_string)
         return filter_string
 
     async def search(
@@ -923,7 +923,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
                     reverse=True,
                 )
 
-            logger.info(f"Found {len(search_results)} results for '{index_name}' ({search_mode})")
+            logger.debug("Found %d results for '%s' (%s)", len(search_results), index_name, search_mode)
             return search_results
 
         except HttpResponseError as e:
@@ -940,7 +940,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
                 },
             )
         except Exception as e:
-            logger.error(f"Search failed for '{index_name}': {e}", exc_info=True)
+            logger.error("Search failed for '%s': %s", index_name, e, exc_info=True)
             raise VectorDatabaseError(
                 f"Search failed: {e}",
                 index_name=index_name,
@@ -998,7 +998,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
         try:
             await self._client_wrapper.index_client.create_or_update_index(updated_index)
         except Exception as e:
-            logger.error(f"Failed to configure reranker for '{index_name}': {e}", exc_info=True)
+            logger.error("Failed to configure reranker for '%s': %s", index_name, e, exc_info=True)
             raise VectorDatabaseError(
                 f"Failed to configure reranker: {e}",
                 index_name=index_name,
@@ -1030,7 +1030,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             logger.debug("Health check passed")
             return True
         except Exception as e:
-            logger.warning(f"Health check failed: {e}")
+            logger.warning("Health check failed: %s", e)
             return False
 
     async def ensure_index(
@@ -1052,17 +1052,17 @@ class AzureAISearchAdapter(VectorDatabasePort):
         try:
             # Try to get the index
             await self._client_wrapper.index_client.get_index(index_name)
-            logger.debug(f"Index '{index_name}' already exists")
+            logger.debug("Index '%s' already exists", index_name)
             return True
         except ResourceNotFoundError:
             # Index doesn't exist, create it
-            logger.info(f"Index '{index_name}' not found, creating...")
+            logger.info("Index '%s' not found, creating...", index_name)
             schema = schema or {"vector_dimension": 1536, "document_type": "operational"}
             if "document_type" not in schema:
                 schema = {**schema, "document_type": "operational"}
             return await self.create_index(index_name, schema)
         except Exception as e:
-            logger.error(f"Failed to ensure index '{index_name}': {e}", exc_info=True)
+            logger.error("Failed to ensure index '%s': %s", index_name, e, exc_info=True)
             raise VectorDatabaseError(
                 f"Failed to ensure index: {e}",
                 index_name=index_name,
@@ -1092,7 +1092,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             # Get the total count from results
             count = await results.get_count() if hasattr(results, "get_count") else 0
 
-            logger.debug(f"Index '{index_name}' contains {count} documents")
+            logger.debug("Index '%s' contains %d documents", index_name, count)
             return count
 
         except HttpResponseError as e:
@@ -1174,11 +1174,11 @@ class AzureAISearchAdapter(VectorDatabasePort):
                     }
                 )
 
-            logger.info(f"Listed {len(indexes)} indexes")
+            logger.info("Listed %d indexes", len(indexes))
             return indexes
 
         except Exception as e:
-            logger.error(f"Failed to list indexes: {e}", exc_info=True)
+            logger.error("Failed to list indexes: %s", e, exc_info=True)
             raise VectorDatabaseError(
                 f"Failed to list indexes: {e}",
                 operation="list_indexes",
@@ -1199,7 +1199,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             VectorDatabaseError: If operation fails
         """
         try:
-            logger.debug(f"Getting index details for '{index_name}'")
+            logger.debug("Getting index details for '%s'", index_name)
 
             # Get the index
             index = await self._client_wrapper.index_client.get_index(index_name)
@@ -1247,17 +1247,19 @@ class AzureAISearchAdapter(VectorDatabasePort):
                 },
             }
 
-            logger.info(f"Retrieved index details for '{index_name}'")
+            logger.info("Retrieved index details for '%s'", index_name)
             return result
 
         except ResourceNotFoundError:
-            logger.warning(f"Index '{index_name}' not found")
+            logger.warning("Index '%s' not found", index_name)
             raise IndexNotFoundError(index_name)
         except IndexNotFoundError:
             raise
         except Exception as e:
             logger.error(
-                f"Failed to get index '{index_name}': {e}",
+                "Failed to get index '%s': %s",
+                index_name,
+                e,
                 exc_info=True,
             )
             raise VectorDatabaseError(
@@ -1281,19 +1283,19 @@ class AzureAISearchAdapter(VectorDatabasePort):
             VectorDatabaseError: If operation fails
         """
         try:
-            logger.info(f"Deleting index '{index_name}'")
+            logger.info("Deleting index '%s'", index_name)
 
             # Check if index exists first
             try:
                 await self._client_wrapper.index_client.get_index(index_name)
             except ResourceNotFoundError:
-                logger.warning(f"Index '{index_name}' not found")
+                logger.warning("Index '%s' not found", index_name)
                 raise IndexNotFoundError(index_name)
 
             # Delete the index
             await self._client_wrapper.index_client.delete_index(index_name)
 
-            logger.info(f"Successfully deleted index '{index_name}'")
+            logger.info("Successfully deleted index '%s'", index_name)
             return True
 
         except IndexNotFoundError:

@@ -606,7 +606,7 @@ async def configure_reranker(
         )
 
     except VectorDatabaseError as e:
-        logger.error(f"Failed to configure reranker: {e}, correlation_id={correlation_id}")
+        logger.error("Failed to configure reranker: %s, correlation_id=%s", e, correlation_id, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -617,7 +617,7 @@ async def configure_reranker(
         )
 
     except Exception:
-        logger.exception(f"Unexpected error configuring reranker: correlation_id={correlation_id}")
+        logger.exception("Unexpected error configuring reranker: correlation_id=%s", correlation_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={

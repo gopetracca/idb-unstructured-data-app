@@ -81,16 +81,16 @@ def _create_document_intelligence_adapter(settings: Settings) -> "DocumentIntell
 
     # Use fake adapter if explicitly requested
     if di_settings.use_fake:
-        logger.info("Using FakeDocumentIntelligenceAdapter for document processing")
+        logger.debug("Using FakeDocumentIntelligenceAdapter for document processing")
         return FakeDocumentIntelligenceAdapter(
             simulated_delay_seconds=di_settings.simulated_delay_seconds,
         )
 
     # Use Azure adapter if credentials are configured
     if di_settings.is_configured:
-        logger.info(
-            f"Using AzureDocumentIntelligenceAdapter for document processing "
-            f"(endpoint: {di_settings.endpoint[:30]}...)"
+        logger.debug(
+            "Using AzureDocumentIntelligenceAdapter (endpoint: %s...)",
+            di_settings.endpoint[:30],
         )
         return AzureDocumentIntelligenceAdapter(settings=di_settings)
 
@@ -121,16 +121,16 @@ def _create_chunker_adapter(settings: Settings) -> "ChunkerPort":
 
     # Use fake adapter if explicitly requested
     if chunking_settings.use_fake:
-        logger.info("Using FakeChunker for document chunking")
+        logger.debug("Using FakeChunker for document chunking")
         return FakeChunker(simulated_delay_seconds=0.0)
 
     # Route to the configured adapter
     if chunking_settings.adapter == "chonkie":
-        logger.info("Using ChonkieChunker for structure-aware document chunking")
+        logger.debug("Using ChonkieChunker for structure-aware document chunking")
         return ChonkieChunker(settings=chunking_settings)
 
     # Default: LlamaIndex adapter
-    logger.info("Using LlamaIndexChunker for document chunking")
+    logger.debug("Using LlamaIndexChunker for document chunking")
     return LlamaIndexChunker(settings=chunking_settings)
 
 
@@ -150,7 +150,7 @@ def _create_embedding_adapter(settings: Settings) -> "EmbeddingPort":
 
     # Use fake adapter if explicitly requested
     if embedding_settings.use_fake:
-        logger.info("Using FakeEmbeddings for vectorization")
+        logger.debug("Using FakeEmbeddings for vectorization")
         return FakeEmbeddings(
             simulated_delay_seconds=0.1,
             default_model=embedding_settings.default_model,
@@ -158,9 +158,9 @@ def _create_embedding_adapter(settings: Settings) -> "EmbeddingPort":
 
     # Use Azure OpenAI adapter if credentials are configured
     if embedding_settings.is_configured:
-        logger.info(
-            f"Using AzureOpenAIEmbeddings for vectorization "
-            f"(endpoint: {embedding_settings.endpoint[:30]}...)"
+        logger.debug(
+            "Using AzureOpenAIEmbeddings (endpoint: %s...)",
+            embedding_settings.endpoint[:30],
         )
         return AzureOpenAIEmbeddings(settings=embedding_settings)
 
@@ -187,7 +187,7 @@ def _create_document_repository(settings: Settings, session_factory=None):
         DocumentRepositorySQLServer,
     )
 
-    logger.info("Using SQL Server DocumentRepository")
+    logger.debug("Using SQL Server DocumentRepository")
     return DocumentRepositorySQLServer(session_factory=session_factory)
 
 
@@ -202,7 +202,7 @@ def _create_chunk_index_repository(settings: Settings, session_factory=None):
         ChunkIndexRepositorySQLServer,
     )
 
-    logger.info("Using SQL Server ChunkIndexRepository")
+    logger.debug("Using SQL Server ChunkIndexRepository")
     return ChunkIndexRepositorySQLServer(session_factory=session_factory)
 
 
@@ -213,7 +213,7 @@ def _create_processing_events_repository(settings: Settings, session_factory=Non
             ProcessingEventsRepositorySQLServer,
         )
 
-        logger.info("Using SQL Server ProcessingEventsRepository")
+        logger.debug("Using SQL Server ProcessingEventsRepository")
         return ProcessingEventsRepositorySQLServer(session_factory=session_factory)
 
     return None
@@ -241,7 +241,7 @@ def _create_sql_session_factory(settings: Settings):
     from src.infrastructure.sqlserver.database import create_engine, create_session_factory
 
     engine = create_engine(settings.sql_server)
-    logger.info("SQL Server async engine created")
+    logger.debug("SQL Server async engine created")
     return create_session_factory(engine)
 
 
@@ -522,7 +522,7 @@ class Container(containers.DeclarativeContainer):
                 if asyncio.iscoroutine(result):
                     await result
             except Exception as e:
-                logger.exception(f"Error closing resource {resource}: {e}")
+                logger.exception("Error closing resource %s: %s", resource, e)
 
         # Dispose SQL Server engine if it was created
         try:

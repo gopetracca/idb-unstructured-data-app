@@ -46,11 +46,11 @@ async def _handle_vectorize_chunks_trigger(
 
     Calls VectorizeChunksUseCase to generate embeddings.
     """
-    logger.info("[vectorize_chunks_trigger] START - received message")
+    logger.debug("vectorize_chunks_trigger received message")
 
     try:
         raw_body = msg.get_body().decode("utf-8")
-        logger.info(f"[vectorize_chunks_trigger] Raw message: {raw_body[:500]}")
+        logger.debug("vectorize_chunks_trigger raw message: %s", raw_body[:500])
 
         from src.application.dto.embedding import VectorizeChunksRequest
         from src.config.settings import get_settings
@@ -58,9 +58,11 @@ async def _handle_vectorize_chunks_trigger(
 
         settings = get_settings()
 
-        logger.info(
-            f"[vectorize_chunks_trigger] Processing document: file_id={envelope.file_id}, "
-            f"tenant_id={envelope.tenant_id}, correlation_id={envelope.correlation_id}"
+        logger.debug(
+            "vectorize_chunks_trigger processing: file_id=%s, tenant_id=%s, correlation_id=%s",
+            envelope.file_id,
+            envelope.tenant_id,
+            envelope.correlation_id,
         )
 
         payload = envelope.payload or {}
@@ -93,16 +95,21 @@ async def _handle_vectorize_chunks_trigger(
                 correlation_id=envelope.correlation_id,
             )
 
-            logger.info(
-                f"[vectorize_chunks_trigger] Executing use case for file_id={envelope.file_id}"
-            )
-
             result = await vectorize_use_case.execute(request)
 
+            logger.debug(
+                "vectorize_chunks_trigger result: file_id=%s, status=%s, embedded=%d, failed=%d",
+                envelope.file_id,
+                result.status,
+                result.embedded_chunks,
+                result.failed_chunks,
+            )
             logger.info(
-                f"[vectorize_chunks_trigger] Vectorization completed: file_id={envelope.file_id}, "
-                f"status={result.status}, embedded={result.embedded_chunks}, "
-                f"failed={result.failed_chunks}"
+                "vectorize_chunks completed: file_id=%s, embedded=%d, failed=%d, status=%s",
+                envelope.file_id,
+                result.embedded_chunks,
+                result.failed_chunks,
+                result.status,
             )
 
         await with_error_handling(
@@ -112,11 +119,5 @@ async def _handle_vectorize_chunks_trigger(
             operation_name="vectorize_chunks",
         )
 
-        logger.info(
-            f"[vectorize_chunks_trigger] COMPLETED successfully for file_id={envelope.file_id}"
-        )
-
-    except Exception as e:
-        error_msg = f"[vectorize_chunks_trigger] FAILED with error: {type(e).__name__}: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+    except Exception:
         raise

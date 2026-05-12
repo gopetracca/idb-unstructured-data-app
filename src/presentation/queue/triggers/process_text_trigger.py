@@ -46,11 +46,11 @@ async def _handle_process_text_trigger(
 
     Extracts text via Document Intelligence and enqueues chunking.
     """
-    logger.info("[process_text_trigger] START - received message")
+    logger.debug("process_text_trigger received message")
 
     try:
         raw_body = msg.get_body().decode("utf-8")
-        logger.info(f"[process_text_trigger] Raw message: {raw_body[:500]}")
+        logger.debug("process_text_trigger raw message: %s", raw_body[:500])
 
         from src.application.dto.document_analysis import DocumentAnalysisRequest
         from src.config.settings import get_settings
@@ -58,9 +58,11 @@ async def _handle_process_text_trigger(
 
         settings = get_settings()
 
-        logger.info(
-            f"[process_text_trigger] Processing document: file_id={envelope.file_id}, "
-            f"tenant_id={envelope.tenant_id}, correlation_id={envelope.correlation_id}"
+        logger.debug(
+            "process_text_trigger processing: file_id=%s, tenant_id=%s, correlation_id=%s",
+            envelope.file_id,
+            envelope.tenant_id,
+            envelope.correlation_id,
         )
 
         payload = envelope.payload or {}
@@ -75,15 +77,21 @@ async def _handle_process_text_trigger(
                 correlation_id=envelope.correlation_id,
             )
 
-            logger.info(f"[process_text_trigger] Executing use case for file_id={envelope.file_id}")
-
             result = await process_use_case.execute(
                 request, chunking_strategy=chunking_strategy
             )
 
+            logger.debug(
+                "process_text_trigger result: file_id=%s, status=%s, processing_time_ms=%s",
+                envelope.file_id,
+                result.status,
+                result.processing_time_ms,
+            )
             logger.info(
-                f"[process_text_trigger] Document processed: file_id={envelope.file_id}, "
-                f"status={result.status}, processing_time_ms={result.processing_time_ms}"
+                "process_text completed: file_id=%s, status=%s, ms=%s",
+                envelope.file_id,
+                result.status,
+                result.processing_time_ms,
             )
 
         await with_error_handling(
@@ -93,9 +101,5 @@ async def _handle_process_text_trigger(
             operation_name="process_text",
         )
 
-        logger.info(f"[process_text_trigger] COMPLETED successfully for file_id={envelope.file_id}")
-
-    except Exception as e:
-        error_msg = f"[process_text_trigger] FAILED with error: {type(e).__name__}: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+    except Exception:
         raise

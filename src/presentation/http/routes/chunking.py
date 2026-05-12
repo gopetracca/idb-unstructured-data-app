@@ -308,7 +308,7 @@ async def list_chunks(
         )
 
     except Exception as e:
-        logger.exception(f"Error listing chunks: file_id={file_id}")
+        logger.exception("Error listing chunks: file_id=%s", file_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={

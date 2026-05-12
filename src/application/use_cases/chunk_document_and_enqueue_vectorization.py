@@ -93,6 +93,7 @@ class ChunkDocumentAndEnqueueVectorizationUseCase:
                 request.file_id,
                 self._queue_name,
                 exc,
+                exc_info=True,
             )
 
         return result

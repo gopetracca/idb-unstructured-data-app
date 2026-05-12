@@ -95,10 +95,14 @@ class SearchUseCase:
         """Execute search with the requested mode."""
         start_time = time.time()
 
-        logger.info(
-            f"Executing {input_dto.search_mode} search: query='{input_dto.query[:50]}...', "
-            f"index={input_dto.index_name}, top_k={input_dto.top_k}, "
-            f"reranker={input_dto.enable_reranker}, correlation_id={input_dto.correlation_id}"
+        logger.debug(
+            "Executing %s search: query='%s...', index=%s, top_k=%d, reranker=%s, correlation_id=%s",
+            input_dto.search_mode,
+            input_dto.query[:50],
+            input_dto.index_name,
+            input_dto.top_k,
+            input_dto.enable_reranker,
+            input_dto.correlation_id,
         )
 
         # Fetch collection metadata (embedding model) — only needed for vector modes
@@ -106,11 +110,11 @@ class SearchUseCase:
 
         collection_info = _get_cached_collection_info(input_dto.index_name)
         if collection_info is None:
-            logger.debug(f"Collection cache miss for '{input_dto.index_name}', fetching from database")
+            logger.debug("Collection cache miss for '%s', fetching from database", input_dto.index_name)
             collection_info = await self._vector_database.get_index(input_dto.index_name)
             _cache_collection_info(input_dto.index_name, collection_info)
         else:
-            logger.debug(f"Collection cache hit for '{input_dto.index_name}'")
+            logger.debug("Collection cache hit for '%s'", input_dto.index_name)
 
         embedding_model = collection_info.get("embedding_model", "text-embedding-3-small")
         expected_vector_dimension = collection_info.get("vector_dimension")
@@ -147,11 +151,13 @@ class SearchUseCase:
                         },
                     )
             logger.debug(
-                f"Generated query embedding: dimension={len(query_vector)}, model={embedding_model}"
+                "Generated query embedding: dimension=%d, model=%s",
+                len(query_vector),
+                embedding_model,
             )
 
         filters = self._build_filters(input_dto)
-        logger.debug(f"Built filters: {filters}, correlation_id={input_dto.correlation_id}")
+        logger.debug("Built filters: %s, correlation_id=%s", filters, input_dto.correlation_id)
 
         top_k = self._resolve_top_k(input_dto)
         search_results = await self._vector_database.search(
@@ -165,8 +171,10 @@ class SearchUseCase:
             reranker_profile=input_dto.reranker_profile,
         )
 
-        logger.info(
-            f"Search completed: found={len(search_results)}, correlation_id={input_dto.correlation_id}"
+        logger.debug(
+            "Search completed: found=%d, correlation_id=%s",
+            len(search_results),
+            input_dto.correlation_id,
         )
 
         # Apply min_score filter against the primary ranking signal
@@ -174,8 +182,10 @@ class SearchUseCase:
             before_count = len(search_results)
             search_results = [r for r in search_results if self._primary_score(r, input_dto.enable_reranker) >= input_dto.min_score]
             logger.debug(
-                f"Applied min_score filter: {before_count} -> {len(search_results)}, "
-                f"min_score={input_dto.min_score}"
+                "Applied min_score filter: %d -> %d, min_score=%s",
+                before_count,
+                len(search_results),
+                input_dto.min_score,
             )
 
         total_results = len(search_results)
@@ -195,9 +205,11 @@ class SearchUseCase:
         search_time_ms = int((time.time() - start_time) * 1000)
         reranker_enabled = input_dto.enable_reranker and any(r.reranker_score is not None for r in search_results)
 
-        logger.info(
-            f"Search use case done: results={len(search_results)}, "
-            f"time={search_time_ms}ms, correlation_id={input_dto.correlation_id}"
+        logger.debug(
+            "Search use case done: results=%d, time=%dms, correlation_id=%s",
+            len(search_results),
+            search_time_ms,
+            input_dto.correlation_id,
         )
 
         return SemanticSearchOutput(

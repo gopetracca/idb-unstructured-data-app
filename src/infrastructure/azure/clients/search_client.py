@@ -46,7 +46,7 @@ class SearchClientWrapper:
         )
         self._search_clients: dict[str, SearchClient] = {}
 
-        logger.debug(f"Initialized SearchClientWrapper for endpoint: {endpoint}")
+        logger.debug("Initialized SearchClientWrapper for endpoint: %s", endpoint)
 
     def get_search_client(self, index_name: str) -> SearchClient:
         """
@@ -67,7 +67,7 @@ class SearchClientWrapper:
                 index_name=index_name,  # IMPORTANT: Use 'index_name', not 'collection_name'
                 credential=self.credential,
             )
-            logger.debug(f"Created new SearchClient for index: {index_name}")
+            logger.debug("Created new SearchClient for index: %s", index_name)
 
         return self._search_clients[index_name]
 
@@ -86,7 +86,7 @@ class SearchClientWrapper:
         # Close all search clients
         for index_name, client in self._search_clients.items():
             await client.close()
-            logger.debug(f"Closed SearchClient for index: {index_name}")
+            logger.debug("Closed SearchClient for index: %s", index_name)
 
         self._search_clients.clear()
 

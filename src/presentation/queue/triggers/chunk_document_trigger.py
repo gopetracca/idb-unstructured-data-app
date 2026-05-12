@@ -46,11 +46,11 @@ async def _handle_chunk_document_trigger(
 
     Calls ChunkDocumentUseCase to chunk extracted text.
     """
-    logger.info("[chunk_document_trigger] START - received message")
+    logger.debug("chunk_document_trigger received message")
 
     try:
         raw_body = msg.get_body().decode("utf-8")
-        logger.info(f"[chunk_document_trigger] Raw message: {raw_body[:500]}")
+        logger.debug("chunk_document_trigger raw message: %s", raw_body[:500])
 
         from src.application.dto.chunking import ChunkDocumentRequest
         from src.config.settings import get_settings
@@ -59,9 +59,11 @@ async def _handle_chunk_document_trigger(
 
         settings = get_settings()
 
-        logger.info(
-            f"[chunk_document_trigger] Processing document: file_id={envelope.file_id}, "
-            f"tenant_id={envelope.tenant_id}, correlation_id={envelope.correlation_id}"
+        logger.debug(
+            "chunk_document_trigger processing: file_id=%s, tenant_id=%s, correlation_id=%s",
+            envelope.file_id,
+            envelope.tenant_id,
+            envelope.correlation_id,
         )
 
         payload = envelope.payload or {}
@@ -84,15 +86,19 @@ async def _handle_chunk_document_trigger(
                 correlation_id=envelope.correlation_id,
             )
 
-            logger.info(
-                f"[chunk_document_trigger] Executing use case for file_id={envelope.file_id}"
-            )
-
             result = await chunk_use_case.execute(request)
 
+            logger.debug(
+                "chunk_document_trigger result: file_id=%s, status=%s, chunk_count=%s",
+                envelope.file_id,
+                result.status,
+                result.chunk_count,
+            )
             logger.info(
-                f"[chunk_document_trigger] Document chunked: file_id={envelope.file_id}, "
-                f"status={result.status}, chunk_count={result.chunk_count}"
+                "chunk_document completed: file_id=%s, chunks=%d, status=%s",
+                envelope.file_id,
+                result.chunk_count,
+                result.status,
             )
 
         await with_error_handling(
@@ -102,11 +108,5 @@ async def _handle_chunk_document_trigger(
             operation_name="chunk_document",
         )
 
-        logger.info(
-            f"[chunk_document_trigger] COMPLETED successfully for file_id={envelope.file_id}"
-        )
-
-    except Exception as e:
-        error_msg = f"[chunk_document_trigger] FAILED with error: {type(e).__name__}: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+    except Exception:
         raise

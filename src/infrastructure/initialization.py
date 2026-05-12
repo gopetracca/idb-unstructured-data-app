@@ -37,9 +37,9 @@ async def initialize_storage(blob_client: BlobStorageClient | None = None) -> No
         for container in settings.azure_storage.container_names:
             try:
                 await blob_client.create_container_if_not_exists(container)
-                logger.info(f"Ensured container exists: {container}")
+                logger.info("Ensured container exists: %s", container)
             except Exception as e:
-                logger.warning(f"Could not create container {container}: {e}")
+                logger.warning("Could not create container %s: %s", container, e)
     finally:
         if owns_blob_client:
             await blob_client.close()
@@ -50,8 +50,8 @@ async def initialize_storage(blob_client: BlobStorageClient | None = None) -> No
         for queue in settings.azure_storage.queue_names:
             try:
                 await queue_client.create_queue_if_not_exists(queue)
-                logger.info(f"Ensured queue exists: {queue}")
+                logger.info("Ensured queue exists: %s", queue)
             except Exception as e:
-                logger.warning(f"Could not create queue {queue}: {e}")
+                logger.warning("Could not create queue %s: %s", queue, e)
     finally:
         await queue_client.close()
