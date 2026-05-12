@@ -27,12 +27,17 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Git SHA tag (short commit, falls back to 'unknown' in detached/no-git envs)
+# ---------------------------------------------------------------------------
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+
+# ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 ACR_NAME="acrnpdaimvpshared"
 IMAGE_NAME="aimvp-unnstructured-data-app"
 TARGET="runtime"
-TAGS="latest"
+TAGS="sha-${GIT_SHA},latest"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
