@@ -23,6 +23,9 @@ class QueueMessageEnvelope(BaseModel):
     timestamp: datetime
     retry_count: int = Field(default=0, alias="retryCount")
     payload: dict[str, Any] = Field(default_factory=dict)
+    datadog_context: dict[str, str] = Field(
+        default_factory=dict, alias="_datadog"
+    )
 
     model_config = {"populate_by_name": True}
 

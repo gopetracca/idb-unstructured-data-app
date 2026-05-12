@@ -153,7 +153,24 @@ class QueueStorageClient:
             "timestamp": datetime.utcnow().isoformat(),
             "retryCount": 0,
             "payload": payload or {},
+            "_datadog": self._get_datadog_trace_headers(),
         }
+
+    @staticmethod
+    def _get_datadog_trace_headers() -> dict[str, str]:
+        """Extract current Datadog trace context for propagation through queues."""
+        try:
+            from ddtrace import tracer
+            from ddtrace.propagation.http import HTTPPropagator
+
+            active_span = tracer.current_span()
+            if active_span:
+                headers: dict[str, str] = {}
+                HTTPPropagator.inject(active_span.context, headers)
+                return headers
+        except ImportError:
+            pass
+        return {}
 
     async def send_message(
         self,

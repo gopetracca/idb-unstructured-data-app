@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.config.settings import get_settings
+from src.utils.trace_context import correlation_id_var
 
 try:
     from ddtrace import tracer
@@ -52,10 +53,15 @@ class DatadogJsonFormatter(logging.Formatter):
             "service": os.getenv("DD_SERVICE", "api-ea-nonstructured"),
             "source": os.getenv("DD_SOURCE", "python"),
             "env": os.getenv("DD_ENV", settings.environment),
+            "version": os.getenv("DD_VERSION", ""),
         }
 
         if record.exc_info:
             payload["exception"] = _single_line(self.formatException(record.exc_info))
+
+        cid = correlation_id_var.get()
+        if cid:
+            payload["correlation_id"] = cid
 
         trace_id = getattr(record, "dd.trace_id", None)
         span_id = getattr(record, "dd.span_id", None)
