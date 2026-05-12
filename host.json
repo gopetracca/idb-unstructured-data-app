@@ -11,7 +11,7 @@
       "Default": "Information",
       "Host": "Warning",
       "Host.Function.Console": "Information",
-      "Function": "Information",
+      "Function": "Warning",
       "Azure.Core": "Error",
       "Microsoft.Azure.WebJobs.Extensions.Storage": "Warning",
       "Microsoft.Azure.WebJobs.Extensions.Storage.Common.Listeners.QueueListener": "Warning",
