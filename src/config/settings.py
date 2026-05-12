@@ -563,6 +563,10 @@ class Settings(BaseSettings):
     log_format: str = "json"
     ddtrace_log_level: str = "WARNING"
     azure_sdk_log_level: str = "WARNING"
+    dd_apm_ignore_resources: str = Field(
+        default="",
+        description="Comma-separated span names to drop from APM traces (DD_APM_IGNORE_RESOURCES)",
+    )
 
     # Core settings
     example: ExampleSettings = Field(default_factory=ExampleSettings)
@@ -634,3 +638,4 @@ def reload_settings() -> Settings:
 if __name__ == "__main__":
     settings = get_settings()
     print(settings)
+

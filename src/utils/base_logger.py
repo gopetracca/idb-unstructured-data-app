@@ -11,8 +11,33 @@ from src.utils.trace_context import correlation_id_var
 
 try:
     from ddtrace import tracer
+    from ddtrace._trace.processor import TraceProcessor as _TraceProcessor
+
+    _DEFAULT_IGNORED = frozenset({"pyodbc.connection.commit", "pyodbc.connection.rollback"})
+
+    def _build_ignored_spans() -> frozenset[str]:
+        """Read DD_APM_IGNORE_RESOURCES via settings (comma-separated span names), falling back to defaults.
+
+        Accepts both literal dots and regex-escaped dots (``\\.``) for compatibility with
+        the official DD_APM_IGNORE_RESOURCES regex syntax.
+        """
+        raw = get_settings().dd_apm_ignore_resources
+        # DD_APM_IGNORE_RESOURCES uses regex syntax; unescape \. -> . for literal comparison
+        names = {name.strip().replace("\\.", ".") for name in raw.split(",") if name.strip()}
+        return frozenset(names) if names else _DEFAULT_IGNORED
+
+    class _DropConnectionOpsFilter(_TraceProcessor):
+        """Drop spans listed in DD_APM_IGNORE_RESOURCES (defaults to pyodbc commit/rollback)."""
+
+        _IGNORED: frozenset[str] = _build_ignored_spans()
+
+        def process_trace(self, trace):
+            filtered = [s for s in trace if s.resource not in self._IGNORED]
+            return filtered if filtered else None
+
 except ImportError:
     tracer = None
+    _DropConnectionOpsFilter = None
 
 settings = get_settings()
 level = settings.logging_level.upper()
@@ -120,6 +145,9 @@ def configure_logging() -> None:
     LOGGING_CONFIG["root"]["handlers"] = ["console"]
     logging.config.dictConfig(LOGGING_CONFIG)
     logging.getLogger("ddtrace").setLevel(settings.ddtrace_log_level.upper())
+
+    if tracer is not None and _DropConnectionOpsFilter is not None:
+        tracer.configure(trace_processors=[_DropConnectionOpsFilter()])
 
     # Chonkie emits a non-actionable tokenizer fallback warning on each invocation.
     warnings.filterwarnings(
