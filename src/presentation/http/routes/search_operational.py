@@ -113,6 +113,11 @@ def _build_input_dto(
     - **hybrid** (default): vector + BM25 fused via Reciprocal Rank Fusion (RRF).
 
     When `enable_reranker=true`, the Azure L2 semantic reranker re-scores top results.
+
+    **Per-result `metadata`** (returned when `include_metadata=true`, default):
+    `filename`, `document_name`, `page_number`, `section_path`, `ezshare_id`,
+    `operation_number`, `document_author`, `country`, `sector`, `dept_id`, `year`.
+    Callers can derive their own text preview from the `text` field if needed.
     """,
 )
 @inject

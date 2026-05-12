@@ -25,7 +25,6 @@ def build_response(output, include_metadata: bool, correlation_id: str) -> Seman
             score=result.score,
             reranker_score=result.reranker_score,
             text=result.text,
-            text_preview=result.text_preview,
             metadata=SearchResultMetadata.from_searchable(result.metadata) if include_metadata else None,
         )
         for result in output.results
