@@ -213,12 +213,14 @@ class SearchResultSchema(BaseModel):
         description="Azure semantic reranker score (0-4), present when reranker is enabled",
     )
     text: str = Field(..., description="Chunk text content")
-    text_preview: str = Field(..., description="First 200 characters of text")
 
     # LLM-friendly metadata for citation and follow-up context
     metadata: SearchResultMetadata | None = Field(
         default=None,
-        description="Result metadata (filename, page, ezshare_id, section_path, year)",
+        description=(
+            "Result metadata: filename, document_name, page_number, section_path, "
+            "ezshare_id, operation_number, document_author, country, sector, dept_id, year"
+        ),
     )
 
 
