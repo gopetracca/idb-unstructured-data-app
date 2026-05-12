@@ -1,0 +1,16 @@
+# Enforce LF line endings for shell scripts so they work inside Linux containers.
+*.sh text eol=lf
+
+# Files and directories to exclude from 'git archive' exports (e.g. ACR builds).
+# The 'export-ignore' attribute tells git archive to skip these paths.
+
+tests/                      export-ignore
+docs/                       export-ignore
+htmlcov/                    export-ignore
+playground/                 export-ignore
+scripts/                    export-ignore
+infra/                      export-ignore
+.venv/                      export-ignore
+.claude/                    export-ignore
+alembic.ini                 export-ignore
+docker-compose*.yml         export-ignore
