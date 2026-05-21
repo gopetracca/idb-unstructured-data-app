@@ -1,27 +1,33 @@
 name: Continuous Integration
+
+# CI for branches that are NOT auto-deployed. Runs tests + SonarQube only.
+# - develop pushes are handled by cd-develop.yml (CI -> build -> deploy)
+# - main/v* releases are handled by continuous-delivery.yml (build only)
+
 on:
-  # Runs when there is a push to the specified branches. If the commit only affects files in 'paths-ignore', the workflow will not run.
-  push:
-    # branches:
-    #   - "feature/**"
-    paths-ignore: 
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths-ignore:
       - 'docs/**'
       - '.gitignore'
       - 'LICENSE'
       - '**.txt'
 
-  # Allows manual execution of the workflow from the GitHub UI
+  push:
+    branches:
+      - 'feature/**'
+    paths-ignore:
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '**.txt'
+
   workflow_dispatch:
 
-# JOBS - Defines the jobs that will be executed
 jobs:
   continuous-integration:
     uses: ./.github/workflows/container-app-python-integration.yml
-    secrets: 
+    secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-  continuous-delivery:
-    needs: continuous-integration
-    uses: ./.github/workflows/container-app-delivery.yml
-    secrets: inherit
-    with:
-      environment: development

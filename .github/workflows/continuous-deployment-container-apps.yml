@@ -16,7 +16,7 @@ on:
         description: Image name (without registry prefix)
         required: false
         type: string
-        default: aimvp-unnstructured-data-app
+        default: aimvp-unstructured-data-app
       image-tag:
         description: 'Immutable image tag to deploy, e.g. sha-7685b57 or v1.2.3'
         required: true

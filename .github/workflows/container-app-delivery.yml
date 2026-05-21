@@ -1,7 +1,10 @@
 name: Container Apps Delivery
 
+# Reusable wrapper around the ACR build. Builds and pushes an image tagged with
+# the commit SHA (and, for v* tag pushes, with the version + latest). Exposes
+# the primary immutable tag so callers can chain a deploy job.
+
 on:
-  # Called as a reusable from continuous-integration.yml
   workflow_call:
     inputs:
       environment:
@@ -9,21 +12,13 @@ on:
         required: false
         type: string
         default: development
-
-  # Build and push sha-<short> tag on every merge to main
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
-    paths-ignore:
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
-      - '**.txt'
-
-  # Allow manual trigger (e.g. rebuild a specific commit)
-  workflow_dispatch:
+    outputs:
+      image-tag:
+        description: Primary immutable tag pushed (sha-<short> or v*)
+        value: ${{ jobs.build-and-push.outputs.image-tag }}
+      image-tags:
+        description: Comma-separated list of all tags pushed
+        value: ${{ jobs.build-and-push.outputs.image-tags }}
 
 jobs:
   build-and-push:

@@ -1,0 +1,38 @@
+name: CD - Development (auto)
+
+# Auto-deploy to the development environment on every push to the develop
+# branch. Pipeline: CI (tests + sonar) -> build & push image to ACR -> deploy
+# revision to the development Container App.
+
+on:
+  push:
+    branches:
+      - develop
+    paths-ignore:
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '**.txt'
+
+  workflow_dispatch:
+
+jobs:
+  ci:
+    uses: ./.github/workflows/container-app-python-integration.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build:
+    needs: ci
+    uses: ./.github/workflows/container-app-delivery.yml
+    secrets: inherit
+    with:
+      environment: development
+
+  deploy:
+    needs: build
+    uses: ./.github/workflows/continuous-deployment-container-apps.yml
+    secrets: inherit
+    with:
+      environment: development
+      image-tag: ${{ needs.build.outputs.image-tag }}

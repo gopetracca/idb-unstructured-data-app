@@ -12,7 +12,7 @@ on:
         description: Image name (without registry prefix)
         required: false
         type: string
-        default: aimvp-unnstructured-data-app
+        default: aimvp-unstructured-data-app
       target:
         description: Dockerfile build target stage
         required: false
@@ -23,6 +23,13 @@ on:
         required: false
         type: string
         default: development
+    outputs:
+      image-tag:
+        description: Primary immutable tag pushed (sha-<short> for branch pushes, the version tag for v* releases)
+        value: ${{ jobs.acr-build.outputs.image-tag }}
+      image-tags:
+        description: Comma-separated list of all tags pushed
+        value: ${{ jobs.acr-build.outputs.image-tags }}
 
 jobs:
   acr-build:
@@ -32,6 +39,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      image-tag: ${{ steps.tags.outputs.primary-tag }}
+      image-tags: ${{ steps.tags.outputs.tags }}
 
     steps:
       - uses: actions/checkout@v4
@@ -54,12 +64,16 @@ jobs:
         id: tags
         run: |
           SHA_SHORT="${GITHUB_SHA::7}"
+          PRIMARY="sha-${SHA_SHORT}"
           TAGS="sha-${SHA_SHORT}"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            PRIMARY="${GITHUB_REF_NAME}"
             TAGS="${TAGS},${GITHUB_REF_NAME},latest"
           fi
+          echo "primary-tag=${PRIMARY}" >> "$GITHUB_OUTPUT"
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
-          echo "Computed tags: ${TAGS}"
+          echo "Primary tag: ${PRIMARY}"
+          echo "All tags:    ${TAGS}"
 
       - name: Build and push to ACR
         run: |

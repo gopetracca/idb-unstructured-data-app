@@ -1,16 +1,26 @@
-name: Continuous Delivery
+name: Continuous Delivery (release tag)
+
+# Triggered when a v* tag is pushed. Builds and pushes an image tagged with the
+# version (e.g. v1.2.3) plus 'latest' and 'sha-<short>'. Does NOT deploy.
+# To roll out a release, manually run "Continuous Deployment - Container Apps"
+# (continuous-deployment.yml) picking the target environment + this image tag.
+
 on:
-  # Runs when there is a push to the specified branches. If the commit only affects files in 'paths-ignore', the workflow will not run.
   push:
     tags:
-        - "v*"
+      - 'v*'
 
-  
-  # Allows manual execution of the workflow from the GitHub UI
   workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment whose creds are used for the ACR build (ACR is shared across envs)
+        required: false
+        type: environment
+        default: development
+
 jobs:
-  continuous-delivery:
+  build:
     uses: ./.github/workflows/container-app-delivery.yml
     secrets: inherit
     with:
-      environment: development
+      environment: ${{ inputs.environment || 'development' }}
