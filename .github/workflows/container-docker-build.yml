@@ -1,0 +1,40 @@
+name: Container Docker Build
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        description: Path to Dockerfile
+        type: string
+        default: './Dockerfile'
+      target:
+        description: Dockerfile build target stage
+        type: string
+        default: runtime
+      build-args:
+        description: Newline-separated Docker build-args
+        type: string
+        default: |
+          INSTALL_IADB_CA=false
+          IADB_ROOT_CA_FILE=.docker/empty-iadb-root-ca.crt
+
+jobs:
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          push: false
+          build-args: ${{ inputs.build-args }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,85 @@
+name: Container Build & Push to ACR
+
+on:
+  workflow_call:
+    inputs:
+      acr-name:
+        description: Azure Container Registry name
+        required: false
+        type: string
+        default: acrnpdaimvpshared
+      image-name:
+        description: Image name (without registry prefix)
+        required: false
+        type: string
+        default: aimvp-unstructured-data-app
+      target:
+        description: Dockerfile build target stage
+        required: false
+        type: string
+        default: runtime
+      environment:
+        description: GitHub Environment to run in (e.g. development, staging, production)
+        required: false
+        type: string
+        default: development
+    outputs:
+      image-tag:
+        description: Primary immutable tag pushed (sha-<short> for branch pushes, the version tag for v* releases)
+        value: ${{ jobs.acr-build.outputs.image-tag }}
+      image-tags:
+        description: Comma-separated list of all tags pushed
+        value: ${{ jobs.acr-build.outputs.image-tags }}
+
+jobs:
+  acr-build:
+    name: ACR Server-side Build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image-tag: ${{ steps.tags.outputs.primary-tag }}
+      image-tags: ${{ steps.tags.outputs.tags }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: dx-developer-platform/github-wf-core-azure-login-action@v1
+        with:
+          environment: ${{ inputs.environment }}
+          client-id: ${{ vars.CLIENT_ID }}
+          client-id-prd: ${{ vars.CLIENT_ID_PRD }}
+          client-id-stg: ${{ vars.CLIENT_ID_STG }}
+          client-id-tst: ${{ vars.CLIENT_ID_TST }}
+          client-id-qa: ${{ vars.CLIENT_ID_QA }}
+          client-id-dev: ${{ vars.CLIENT_ID_DEV }}
+          client-secret: ${{ secrets.CLIENT_SECRET }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SHA_SHORT="${GITHUB_SHA::7}"
+          PRIMARY="sha-${SHA_SHORT}"
+          TAGS="sha-${SHA_SHORT}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            PRIMARY="${GITHUB_REF_NAME}"
+            TAGS="${TAGS},${GITHUB_REF_NAME},latest"
+          fi
+          echo "primary-tag=${PRIMARY}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Primary tag: ${PRIMARY}"
+          echo "All tags:    ${TAGS}"
+
+      - name: Build and push to ACR
+        run: |
+          chmod +x scripts/acr_build.sh
+          scripts/acr_build.sh \
+            --registry "${{ inputs.acr-name }}" \
+            --image    "${{ inputs.image-name }}" \
+            --target   "${{ inputs.target }}" \
+            --tags     "${{ steps.tags.outputs.tags }}"

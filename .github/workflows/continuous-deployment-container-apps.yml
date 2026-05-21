@@ -1,0 +1,66 @@
+name: Container Apps Deployment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment (e.g. development, staging, production)
+        required: true
+        type: string
+      acr-name:
+        description: Azure Container Registry name
+        required: false
+        type: string
+        default: acrnpdaimvpshared
+      image-name:
+        description: Image name (without registry prefix)
+        required: false
+        type: string
+        default: aimvp-unstructured-data-app
+      image-tag:
+        description: 'Immutable image tag to deploy, e.g. sha-7685b57 or v1.2.3'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy Container App Revision
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: dx-developer-platform/github-wf-core-azure-login-action@v1
+        with:
+          environment: ${{ inputs.environment }}
+          client-id: ${{ vars.CLIENT_ID }}
+          client-id-prd: ${{ vars.CLIENT_ID_PRD }}
+          client-id-stg: ${{ vars.CLIENT_ID_STG }}
+          client-id-tst: ${{ vars.CLIENT_ID_TST }}
+          client-id-qa: ${{ vars.CLIENT_ID_QA }}
+          client-id-dev: ${{ vars.CLIENT_ID_DEV }}
+          client-secret: ${{ secrets.CLIENT_SECRET }}
+          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+
+      - name: Deploy Container App revision
+        shell: bash
+        env:
+          CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
+          IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          chmod +x scripts/deploy_container_app.sh
+          scripts/deploy_container_app.sh \
+            --app "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --acr "$ACR_NAME" \
+            --image "$IMAGE_NAME" \
+            --tag "$IMAGE_TAG"
