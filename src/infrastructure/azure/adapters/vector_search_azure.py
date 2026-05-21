@@ -527,6 +527,20 @@ class AzureAISearchAdapter(VectorDatabasePort):
 
         except IndexNotFoundError:
             raise
+        except ResourceNotFoundError:
+            raise IndexNotFoundError(index_name)
+        except HttpResponseError as e:
+            if e.status_code == 404:
+                raise IndexNotFoundError(index_name)
+            logger.error(
+                f"Failed to delete by file_id '{file_id}' from '{index_name}': {e}",
+                exc_info=True,
+            )
+            raise VectorDatabaseError(
+                f"Failed to delete by file_id: {e}",
+                index_name=index_name,
+                operation="delete_by_file_id",
+            )
         except Exception as e:
             logger.error(
                 f"Failed to delete by file_id '{file_id}' from '{index_name}': {e}",

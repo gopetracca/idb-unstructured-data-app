@@ -7,7 +7,11 @@ from src.application.dto.document_dto import DeleteDocumentInput, DeleteDocument
 from src.application.ports.blob_store import BlobStorePort
 from src.application.ports.document_store import DocumentStorePort
 from src.application.ports.vector_database import VectorDatabasePort
-from src.core.errors import DocumentNotFoundError, StorageError
+from src.core.errors import (
+    DocumentNotFoundError,
+    IndexNotFoundError,
+    StorageError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,17 +75,33 @@ class DeleteDocumentUseCase:
                     e,
                 )
 
-        # Delete chunks from vector index — failure is logged but does not block cleanup
-        try:
-            await self._vector_database.delete_by_file_id(
-                self._index_name, input_dto.file_id
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to delete vector index chunks for file '%s': %s",
+        # Delete chunks from the document's own collection (index) — falls back to
+        # the configured default only when the document has no collection_name.
+        # Failures are logged but do not block SQL cleanup.
+        target_index = doc.document.collection_name or self._index_name
+        if not target_index:
+            logger.info(
+                "Skipping vector index cleanup for file '%s': no collection_name on document and no default index configured",
                 input_dto.file_id,
-                e,
             )
+        else:
+            try:
+                await self._vector_database.delete_by_file_id(
+                    target_index, input_dto.file_id
+                )
+            except IndexNotFoundError:
+                logger.warning(
+                    "Vector index '%s' not found for file '%s' — skipping vector index cleanup",
+                    target_index,
+                    input_dto.file_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to delete vector index chunks for file '%s' from index '%s': %s",
+                    input_dto.file_id,
+                    target_index,
+                    e,
+                )
 
         # Delete metadata record (cascades to pipeline_state, file_metadata, chunks, processing_events)
         try:
