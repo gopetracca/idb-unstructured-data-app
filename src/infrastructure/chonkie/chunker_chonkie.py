@@ -4,18 +4,37 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+import tiktoken
 from chonkie import RecursiveChunker, SemanticChunker, TokenChunker
+from chonkie.types.recursive import RecursiveLevel, RecursiveRules
 
 from src.application.ports.chunker import ChunkerPort
 from src.config.settings import ChunkingSettings
 from src.core.entities.chunk import Chunk, ChunkMetadata
 from src.core.errors import ChunkingError, InvalidChunkingStrategyError
 from src.core.value_objects.chunking_strategy import ChunkingStrategy, ChunkingStrategyName
-from src.infrastructure.chonkie.metadata import HeadingTracker, PageTracker, count_tokens
+from src.infrastructure.chonkie.metadata import (
+    HeadingTracker,
+    PageTracker,
+    count_tokens,
+    get_tiktoken_encoding,
+)
 from src.infrastructure.chonkie.table_handler import (
     TableBlock,
     extract_tables,
     get_placeholder_pattern,
+)
+
+# Vendored rules from chonkie-ai/recipes::recipes/markdown_en.json (schema v1, version 0.1.0).
+# Inlined to avoid a runtime HuggingFace download, making MARKDOWN_AWARE fully offline.
+_MARKDOWN_EN_RULES = RecursiveRules(
+    levels=[
+        RecursiveLevel(delimiters=["######", "#####", "####", "###", "##", "#"], whitespace=False, include_delim="next"),
+        RecursiveLevel(delimiters=["\n\n", "\n\r"], whitespace=False, include_delim="prev"),
+        RecursiveLevel(delimiters=["\n", "\r"], whitespace=False, include_delim="prev"),
+        RecursiveLevel(delimiters=[". ", "! ", "? "], whitespace=False, include_delim="prev"),
+        RecursiveLevel(delimiters=None, whitespace=False, include_delim="prev"),
+    ]
 )
 
 logger = logging.getLogger(__name__)
@@ -24,24 +43,38 @@ logger = logging.getLogger(__name__)
 class ChonkieChunker(ChunkerPort):
     """Structure-aware chunking adapter using the Chonkie library.
 
-    Supports four strategies:
+    Supports up to four strategies:
     - FIXED_SIZE: Token-based fixed-size chunking using TokenChunker
     - MARKDOWN_AWARE: Heading-aware structural chunking using RecursiveChunker with markdown recipe
     - RECURSIVE: Recursive chunking with custom markdown-aware rules
-    - SEMANTIC: Embedding-based boundary detection using SemanticChunker
+    - SEMANTIC: Embedding-based boundary detection using SemanticChunker (disabled by default)
 
     All strategies extract HTML tables as atomic chunks before processing text.
+    The tokenizer (cl100k_base) is pre-loaded once at construction so no outbound
+    network calls are made at runtime for token-based strategies.
     """
-
-    _SUPPORTED_STRATEGIES = [
-        ChunkingStrategyName.FIXED_SIZE,
-        ChunkingStrategyName.MARKDOWN_AWARE,
-        ChunkingStrategyName.RECURSIVE,
-        ChunkingStrategyName.SEMANTIC,
-    ]
 
     def __init__(self, settings: ChunkingSettings) -> None:
         self._settings = settings
+
+        try:
+            self._tokenizer: tiktoken.Encoding = get_tiktoken_encoding("cl100k_base")
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to load cl100k_base tiktoken encoding during ChonkieChunker init. "
+                "If running offline, ensure TIKTOKEN_CACHE_DIR is set and the cache is "
+                "populated at image build time."
+            ) from e
+
+        supported: list[ChunkingStrategyName] = [
+            ChunkingStrategyName.FIXED_SIZE,
+            ChunkingStrategyName.MARKDOWN_AWARE,
+            ChunkingStrategyName.RECURSIVE,
+        ]
+        if settings.enable_semantic_chunking:
+            supported.append(ChunkingStrategyName.SEMANTIC)
+        self._supported_strategies: list[ChunkingStrategyName] = supported
+
         # Cached chunker instances keyed by (strategy_name, chunk_size, chunk_overlap)
         self._chunker_cache: dict[
             tuple[str, int, int], TokenChunker | RecursiveChunker | SemanticChunker
@@ -108,7 +141,7 @@ class ChonkieChunker(ChunkerPort):
             ) from e
 
     def get_supported_strategies(self) -> list[ChunkingStrategyName]:
-        return list(self._SUPPORTED_STRATEGIES)
+        return list(self._supported_strategies)
 
     def _chunk_with_strategy(
         self, text: str, strategy: ChunkingStrategy
@@ -145,12 +178,13 @@ class ChonkieChunker(ChunkerPort):
 
     def _chunk_fixed_size(self, text: str, strategy: ChunkingStrategy) -> list:
         """Chunk using TokenChunker for fixed-size token-based chunking."""
+        tokenizer = self._tokenizer
         chunker = self._get_or_create_chunker(
             "fixed_size",
             strategy.chunk_size,
             strategy.chunk_overlap,
             lambda: TokenChunker(
-                tokenizer="cl100k_base",
+                tokenizer=tokenizer,
                 chunk_size=strategy.chunk_size,
                 chunk_overlap=strategy.chunk_overlap,
             ),
@@ -158,16 +192,16 @@ class ChonkieChunker(ChunkerPort):
         return chunker.chunk(text)
 
     def _chunk_markdown_aware(self, text: str, strategy: ChunkingStrategy) -> list:
-        """Chunk using RecursiveChunker with markdown recipe."""
+        """Chunk using RecursiveChunker with vendored markdown rules (no HuggingFace download)."""
+        tokenizer = self._tokenizer
         chunker = self._get_or_create_chunker(
             "markdown_aware",
             strategy.chunk_size,
             strategy.chunk_overlap,
-            lambda: RecursiveChunker.from_recipe(
-                "markdown",
-                lang="en",
-                tokenizer="cl100k_base",
+            lambda: RecursiveChunker(
+                tokenizer=tokenizer,
                 chunk_size=strategy.chunk_size,
+                rules=_MARKDOWN_EN_RULES,
                 min_characters_per_chunk=24,
             ),
         )
@@ -175,12 +209,13 @@ class ChonkieChunker(ChunkerPort):
 
     def _chunk_recursive(self, text: str, strategy: ChunkingStrategy) -> list:
         """Chunk using RecursiveChunker with default recursive rules."""
+        tokenizer = self._tokenizer
         chunker = self._get_or_create_chunker(
             "recursive",
             strategy.chunk_size,
             strategy.chunk_overlap,
             lambda: RecursiveChunker(
-                tokenizer="cl100k_base",
+                tokenizer=tokenizer,
                 chunk_size=strategy.chunk_size,
                 min_characters_per_chunk=24,
             ),

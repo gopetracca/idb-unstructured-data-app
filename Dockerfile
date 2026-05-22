@@ -64,6 +64,16 @@ COPY ./pyproject.toml ./uv.lock ./
 ENV UV_PROJECT_ENVIRONMENT=/opt/python/3
 RUN uv --native-tls sync --no-dev --locked
 
+# Warm the tiktoken cl100k_base BPE cache at build time.
+# MARKDOWN_AWARE uses vendored rules (no HuggingFace download needed).
+# TIKTOKEN_CACHE_DIR persists in the final image via ENV.
+# HF_HUB_OFFLINE=1 blocks any surprise HuggingFace downloads at runtime.
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken_cache
+ENV HF_HUB_OFFLINE=1
+
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" \
+ && /opt/python/3/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base'); print('tiktoken cache warmed')"
+
 COPY . /home/site/wwwroot
 RUN rm -rf /home/site/wwwroot/.docker /home/site/wwwroot/iadb-root-ca.crt
 
