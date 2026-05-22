@@ -26,6 +26,17 @@ def _normalize_page_label(raw_value: str) -> str | None:
     return normalized or None
 
 
+def get_tiktoken_encoding(encoding_name: str = _DEFAULT_ENCODING) -> tiktoken.Encoding:
+    """Return a cached tiktoken Encoding instance.
+
+    The cache is module-level so callers share the same Encoding across
+    ChonkieChunker token-based strategies and count_tokens.
+    """
+    if encoding_name not in _encoding_cache:
+        _encoding_cache[encoding_name] = tiktoken.get_encoding(encoding_name)
+    return _encoding_cache[encoding_name]
+
+
 def count_tokens(text: str, encoding_name: str = _DEFAULT_ENCODING) -> int:
     """Count tokens in text using tiktoken.
 
@@ -36,9 +47,7 @@ def count_tokens(text: str, encoding_name: str = _DEFAULT_ENCODING) -> int:
     Returns:
         Number of tokens.
     """
-    if encoding_name not in _encoding_cache:
-        _encoding_cache[encoding_name] = tiktoken.get_encoding(encoding_name)
-    return len(_encoding_cache[encoding_name].encode(text))
+    return len(get_tiktoken_encoding(encoding_name).encode(text))
 
 
 class HeadingTracker:

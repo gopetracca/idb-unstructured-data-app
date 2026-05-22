@@ -2,7 +2,40 @@
 
 import pytest
 
-from src.infrastructure.chonkie.metadata import HeadingTracker, PageTracker, count_tokens
+import tiktoken
+
+from src.infrastructure.chonkie.metadata import (
+    HeadingTracker,
+    PageTracker,
+    count_tokens,
+    get_tiktoken_encoding,
+)
+
+
+class TestGetTiktokenEncoding:
+    """Tests for get_tiktoken_encoding function."""
+
+    def test_returns_tiktoken_encoding(self):
+        """Returns a tiktoken.Encoding instance."""
+        enc = get_tiktoken_encoding()
+        assert isinstance(enc, tiktoken.Encoding)
+
+    def test_default_encoding_is_cl100k_base(self):
+        """Default encoding is cl100k_base."""
+        enc = get_tiktoken_encoding()
+        assert enc.name == "cl100k_base"
+
+    def test_returns_same_instance(self):
+        """Multiple calls with the same name return the same cached instance."""
+        enc1 = get_tiktoken_encoding("cl100k_base")
+        enc2 = get_tiktoken_encoding("cl100k_base")
+        assert enc1 is enc2
+
+    def test_encoding_encodes_text(self):
+        """Returned encoding can encode text."""
+        enc = get_tiktoken_encoding()
+        tokens = enc.encode("Hello, world!")
+        assert len(tokens) > 0
 
 
 class TestCountTokens:

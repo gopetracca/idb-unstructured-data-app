@@ -334,6 +334,14 @@ class ChunkingSettings(BaseSettings):
         description="Use fake implementation instead of real adapter (for local dev/testing)",
     )
 
+    enable_semantic_chunking: bool = Field(
+        default=False,
+        description=(
+            "Enable Chonkie SemanticChunker. Requires a packaged local embedding "
+            "model in offline environments. Off by default for reliability."
+        ),
+    )
+
     # Integration test control
     run_tests: str = Field(
         default="off",

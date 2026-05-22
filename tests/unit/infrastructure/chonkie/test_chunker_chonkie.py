@@ -10,20 +10,40 @@ from src.infrastructure.chonkie.chunker_chonkie import ChonkieChunker
 
 @pytest.fixture
 def chunking_settings() -> ChunkingSettings:
-    """Create chunking settings for testing."""
+    """Create chunking settings for testing (semantic disabled by default)."""
     return ChunkingSettings(
         default_strategy="markdown_aware",
         default_chunk_size=512,
         default_chunk_overlap=50,
         adapter="chonkie",
         use_fake=False,
+        enable_semantic_chunking=False,
+    )
+
+
+@pytest.fixture
+def chunking_settings_with_semantic() -> ChunkingSettings:
+    """Create chunking settings with semantic chunking enabled."""
+    return ChunkingSettings(
+        default_strategy="markdown_aware",
+        default_chunk_size=512,
+        default_chunk_overlap=50,
+        adapter="chonkie",
+        use_fake=False,
+        enable_semantic_chunking=True,
     )
 
 
 @pytest.fixture
 def chonkie_chunker(chunking_settings: ChunkingSettings) -> ChonkieChunker:
-    """Create a ChonkieChunker instance for testing."""
+    """Create a ChonkieChunker instance for testing (semantic disabled)."""
     return ChonkieChunker(settings=chunking_settings)
+
+
+@pytest.fixture
+def chonkie_chunker_semantic(chunking_settings_with_semantic: ChunkingSettings) -> ChonkieChunker:
+    """Create a ChonkieChunker instance with semantic chunking enabled."""
+    return ChonkieChunker(settings=chunking_settings_with_semantic)
 
 
 SAMPLE_MARKDOWN = """# Introduction
@@ -145,19 +165,39 @@ The company achieved strong growth with a healthy profit margin.
 class TestChonkieChunkerStrategies:
     """Tests for strategy support."""
 
-    def test_get_supported_strategies(self, chonkie_chunker: ChonkieChunker):
-        """Chonkie supports FIXED_SIZE, MARKDOWN_AWARE, RECURSIVE, and SEMANTIC."""
+    def test_get_supported_strategies_defaults(self, chonkie_chunker: ChonkieChunker):
+        """Default config: FIXED_SIZE, MARKDOWN_AWARE, RECURSIVE — SEMANTIC excluded."""
         strategies = chonkie_chunker.get_supported_strategies()
 
         assert ChunkingStrategyName.FIXED_SIZE in strategies
         assert ChunkingStrategyName.MARKDOWN_AWARE in strategies
         assert ChunkingStrategyName.RECURSIVE in strategies
+        assert ChunkingStrategyName.SEMANTIC not in strategies
+        assert len(strategies) == 3
+
+    def test_get_supported_strategies_with_semantic(self, chonkie_chunker_semantic: ChonkieChunker):
+        """When enable_semantic_chunking=True, SEMANTIC appears in supported strategies."""
+        strategies = chonkie_chunker_semantic.get_supported_strategies()
+
         assert ChunkingStrategyName.SEMANTIC in strategies
         assert len(strategies) == 4
 
     def test_fixed_size_is_supported(self, chonkie_chunker: ChonkieChunker):
         """FIXED_SIZE is supported by Chonkie adapter via TokenChunker."""
         assert chonkie_chunker.is_strategy_supported(ChunkingStrategyName.FIXED_SIZE) is True
+
+    async def test_semantic_rejected_when_disabled(self, chonkie_chunker: ChonkieChunker):
+        """Requesting SEMANTIC while disabled raises InvalidChunkingStrategyError immediately."""
+        strategy = ChunkingStrategy.semantic(chunk_size=200, chunk_overlap=20)
+
+        with pytest.raises(InvalidChunkingStrategyError) as exc_info:
+            await chonkie_chunker.chunk_text(
+                text=SAMPLE_MARKDOWN,
+                file_id="test-file",
+                strategy=strategy,
+            )
+
+        assert "semantic_chunking" in exc_info.value.strategy_name
 
 
 class TestMarkdownAwareChunking:
@@ -370,13 +410,13 @@ class TestRecursiveChunking:
 
 
 class TestSemanticChunking:
-    """Tests for SEMANTIC strategy."""
+    """Tests for SEMANTIC strategy (requires enable_semantic_chunking=True)."""
 
-    async def test_semantic_basic(self, chonkie_chunker: ChonkieChunker):
-        """Semantic chunking produces chunks."""
+    async def test_semantic_basic(self, chonkie_chunker_semantic: ChonkieChunker):
+        """Semantic chunking produces chunks when the flag is enabled."""
         strategy = ChunkingStrategy.semantic(chunk_size=200, chunk_overlap=20)
 
-        chunks = await chonkie_chunker.chunk_text(
+        chunks = await chonkie_chunker_semantic.chunk_text(
             text=SAMPLE_MARKDOWN,
             file_id="test-file",
             strategy=strategy,
@@ -385,11 +425,11 @@ class TestSemanticChunking:
         assert len(chunks) > 0
         assert all(c.file_id == "test-file" for c in chunks)
 
-    async def test_semantic_has_metadata(self, chonkie_chunker: ChonkieChunker):
+    async def test_semantic_has_metadata(self, chonkie_chunker_semantic: ChonkieChunker):
         """Semantic chunks include metadata."""
         strategy = ChunkingStrategy.semantic(chunk_size=200, chunk_overlap=20)
 
-        chunks = await chonkie_chunker.chunk_text(
+        chunks = await chonkie_chunker_semantic.chunk_text(
             text=SAMPLE_MARKDOWN,
             file_id="test-file",
             strategy=strategy,
