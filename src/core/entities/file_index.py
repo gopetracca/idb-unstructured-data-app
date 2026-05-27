@@ -94,10 +94,15 @@ class FileIndex(BaseModel):
 
     # Promoted metadata fields (stored in file_metadata table for efficient filtering)
     # These fields map 1:1 to SQL columns — SQL is SSOT (ADR-005)
+    document_category: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Schema discriminator: 'operational' or 'publication'",
+    )
     document_type: str | None = Field(
         default=None,
         max_length=100,
-        description="Document type discriminator for metadata specialization",
+        description="User-facing document classification (e.g., 'PCR', 'Report', 'LP')",
     )
     language: str | None = Field(
         default="en",

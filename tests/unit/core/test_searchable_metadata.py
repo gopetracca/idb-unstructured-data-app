@@ -66,10 +66,10 @@ class TestOperationalSearchableMetadata:
     """Tests for OperationalSearchableMetadata subclass."""
 
     def test_create_with_defaults(self) -> None:
-        """Test operational metadata defaults to document_type='operational'."""
+        """Test operational metadata default document_type is None (user-provided now)."""
         metadata = OperationalSearchableMetadata()
 
-        assert metadata.document_type == "operational"
+        assert metadata.document_type is None  # No longer hardcoded; user-provided
         assert metadata.country is None
         assert metadata.year is None
         assert metadata.operation_number is None
@@ -96,10 +96,10 @@ class TestPublicationSearchableMetadata:
     """Tests for PublicationSearchableMetadata subclass."""
 
     def test_create_with_defaults(self) -> None:
-        """Test publication metadata defaults to document_type='publication'."""
+        """Test publication metadata default document_type is None (user-provided now)."""
         metadata = PublicationSearchableMetadata()
 
-        assert metadata.document_type == "publication"
+        assert metadata.document_type is None  # No longer hardcoded; user-provided
         assert metadata.journal is None
         assert metadata.doi is None
 
@@ -142,7 +142,8 @@ class TestCreateSearchableMetadata:
     def test_from_document_and_chunk_with_operational_metadata(self) -> None:
         doc_meta = OperationalDocumentMetadata(
             file_id="file-1",
-            document_type="operational",
+            document_category="operational",  # Schema discriminator
+            document_type="PCR",              # User-facing type
             country="Uruguay",
             year=2024,
             sector="TRANSPORT",
@@ -175,7 +176,7 @@ class TestCreateSearchableMetadata:
         )
 
         assert isinstance(sm, OperationalSearchableMetadata)
-        assert sm.document_type == "operational"
+        assert sm.document_type == "PCR"  # User-facing type flows through
         assert sm.country == "Uruguay"
         assert sm.year == 2024
         assert sm.sector == "TRANSPORT"
@@ -205,7 +206,8 @@ class TestCreateSearchableMetadata:
 
         doc_meta = PublicationDocumentMetadata(
             file_id="file-2",
-            document_type="publication",
+            document_category="publication",     # Schema discriminator
+            document_type="journal_article",     # User-facing type
             country="Global",
             year=2024,
             journal="Journal of Development",
@@ -223,7 +225,7 @@ class TestCreateSearchableMetadata:
         )
 
         assert isinstance(sm, PublicationSearchableMetadata)
-        assert sm.document_type == "publication"
+        assert sm.document_type == "journal_article"  # User-facing type flows through
         assert sm.journal == "Journal of Development"
         assert sm.doi == "10.1234/jod.2024.001"
         assert sm.peer_reviewed is True
@@ -274,7 +276,7 @@ class TestCreateSearchableMetadata:
 
         doc_meta = OperationalDocumentMetadata(
             file_id="f1",
-            document_type="operational",
+            document_category="operational",  # Schema discriminator
             document_publish_date=datetime(2024, 6, 15, 12, 0, 0),
         )
         sm = create_searchable_metadata(
@@ -286,23 +288,23 @@ class TestCreateSearchableMetadata:
 
 
 class TestGetSearchableMetadataModel:
-    """Tests for get_searchable_metadata_model function."""
+    """Tests for get_searchable_metadata_model function (now keyed by document_category)."""
 
     def test_none_returns_operational(self) -> None:
         model = get_searchable_metadata_model(None)
         assert model is OperationalSearchableMetadata
 
-    def test_operational_returns_operational(self) -> None:
+    def test_operational_category_returns_operational(self) -> None:
         model = get_searchable_metadata_model("operational")
         assert model is OperationalSearchableMetadata
 
-    def test_publication_returns_publication(self) -> None:
+    def test_publication_category_returns_publication(self) -> None:
         model = get_searchable_metadata_model("publication")
         assert model is PublicationSearchableMetadata
 
-    def test_unknown_returns_operational(self) -> None:
-        """Unknown types default to operational."""
-        model = get_searchable_metadata_model("unknown_type")
+    def test_unknown_category_returns_operational(self) -> None:
+        """Unknown categories default to operational."""
+        model = get_searchable_metadata_model("unknown_category")
         assert model is OperationalSearchableMetadata
 
 

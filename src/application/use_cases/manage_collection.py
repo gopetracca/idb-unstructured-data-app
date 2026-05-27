@@ -65,7 +65,7 @@ class ManageCollectionUseCase:
             schema = {
                 "vector_dimension": input_dto.vector_dimension,
                 "embedding_model": input_dto.embedding_model,
-                "document_type": input_dto.document_type,
+                "document_category": input_dto.document_category,
             }
             await self._vector_db.create_index(input_dto.name, schema)
 

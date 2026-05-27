@@ -29,7 +29,6 @@ router = APIRouter(prefix="/api/v1/search/operational", tags=["search"])
 
 _DEFAULT_SEARCH_MODE = SearchMode.HYBRID
 _DEFAULT_ENABLE_RERANKER = False
-_DOCUMENT_TYPE = "operational"
 
 
 def _build_input_dto(
@@ -39,7 +38,8 @@ def _build_input_dto(
 ) -> SemanticSearchInput:
     """Map OperationalSearchRequest to application DTO.
 
-    Hard-codes document_type="operational". Publication-only fields are absent
+    The document_type filter is now user-provided (e.g., "PCR", "Report") rather
+    than a hardcoded schema discriminator. Publication-only fields are absent
     from OperationalSearchRequest so clients cannot pass them.
     """
     resolved_mode = request.search_mode or _DEFAULT_SEARCH_MODE
@@ -64,7 +64,7 @@ def _build_input_dto(
         top_k=request.top_k,
         min_score=request.min_score,
         file_ids=request.file_ids,
-        document_type=_DOCUMENT_TYPE,
+        document_type=request.document_type,  # User-provided filter (e.g., "PCR", "Report")
         tags=request.tags,
         department=request.department,
         source=request.source,
@@ -105,7 +105,8 @@ def _build_input_dto(
     Search over operational document embeddings. Only operational-document filters are
     exposed — passing publication-only fields (journal, doi, etc.) is a schema error (422).
 
-    The `document_type` is always `"operational"` and cannot be overridden.
+    Optionally filter by `document_type` (e.g., `"PCR"`, `"Report"`, `"LP"`) to narrow
+    results to a specific document classification within operational documents.
 
     Supports three search modes:
     - **semantic** (vector-only): cosine similarity over embeddings.

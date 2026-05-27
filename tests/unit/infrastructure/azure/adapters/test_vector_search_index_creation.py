@@ -92,8 +92,8 @@ class TestCreateMetadataFields:
             assert len(fields) == len(registry_schema)
 
     def test_unknown_document_type_raises_error(self, adapter):
-        """Test that unknown document type raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown document type"):
+        """Test that unknown document category raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown document category"):
             adapter._create_metadata_fields("unknown_type")
 
 
@@ -168,25 +168,25 @@ class TestCreateIndexFields:
 
 
 class TestCreateIndexWithDocumentType:
-    """Tests for create_index method with document_type support."""
+    """Tests for create_index method with document_category support."""
 
     @pytest.mark.asyncio
     async def test_create_index_without_document_type_raises(self, adapter):
-        """Test creating index without document_type raises ValueError."""
+        """Test creating index without document_category raises ValueError."""
         adapter._client_wrapper.index_client = AsyncMock()
 
-        with pytest.raises(ValueError, match="document_type"):
+        with pytest.raises(ValueError, match="document_category"):
             await adapter.create_index("test-index", {"vector_dimension": 1536})
 
     @pytest.mark.asyncio
     async def test_create_index_with_operational_document_type(self, adapter):
-        """Test creating index with explicit operational document_type."""
+        """Test creating index with explicit operational document_category."""
         adapter._client_wrapper.index_client = AsyncMock()
         adapter._client_wrapper.index_client.create_or_update_index = AsyncMock()
 
         await adapter.create_index(
             "test-index",
-            {"vector_dimension": 1536, "document_type": "operational"},
+            {"vector_dimension": 1536, "document_category": "operational"},
         )
 
         call_args = adapter._client_wrapper.index_client.create_or_update_index.call_args
@@ -201,13 +201,13 @@ class TestCreateIndexWithDocumentType:
 
     @pytest.mark.asyncio
     async def test_create_index_with_publication_document_type(self, adapter):
-        """Test creating index with publication document_type."""
+        """Test creating index with publication document_category."""
         adapter._client_wrapper.index_client = AsyncMock()
         adapter._client_wrapper.index_client.create_or_update_index = AsyncMock()
 
         await adapter.create_index(
             "test-index",
-            {"vector_dimension": 1536, "document_type": "publication"},
+            {"vector_dimension": 1536, "document_category": "publication"},
         )
 
         call_args = adapter._client_wrapper.index_client.create_or_update_index.call_args
@@ -221,21 +221,21 @@ class TestCreateIndexWithDocumentType:
         assert "doi" in metadata_field_names
         assert "operation_number" not in metadata_field_names
 
-        # Verify description contains correct document_type
+        # Verify description contains correct document_category
         import json
 
         description = json.loads(index.description)
-        assert description["document_type"] == "publication"
+        assert description["document_category"] == "publication"
 
     @pytest.mark.asyncio
     async def test_create_index_with_invalid_document_type_raises_error(self, adapter):
-        """Test creating index with invalid document_type raises ValueError."""
+        """Test creating index with invalid document_category raises ValueError."""
         adapter._client_wrapper.index_client = AsyncMock()
 
-        with pytest.raises(ValueError, match="Unknown document_type"):
+        with pytest.raises(ValueError, match="Unknown document_category"):
             await adapter.create_index(
                 "test-index",
-                {"vector_dimension": 1536, "document_type": "invalid_type"},
+                {"vector_dimension": 1536, "document_category": "invalid_type"},
             )
 
     @pytest.mark.asyncio
@@ -249,7 +249,7 @@ class TestCreateIndexWithDocumentType:
             {
                 "vector_dimension": 1536,
                 "embedding_model": "text-embedding-3-large",
-                "document_type": "operational",
+                "document_category": "operational",
             },
         )
 
@@ -260,7 +260,7 @@ class TestCreateIndexWithDocumentType:
 
         description = json.loads(index.description)
         assert description["embedding_model"] == "text-embedding-3-large"
-        assert description["document_type"] == "operational"
+        assert description["document_category"] == "operational"
 
 
 class TestIndexFieldProperties:
@@ -362,7 +362,7 @@ class TestConvenienceMethods:
 
     @pytest.mark.asyncio
     async def test_create_operational_index(self, adapter):
-        """Test convenience method sets document_type=operational."""
+        """Test convenience method sets document_category=operational."""
         adapter._client_wrapper.index_client = AsyncMock()
         adapter._client_wrapper.index_client.create_or_update_index = AsyncMock()
 
@@ -374,7 +374,7 @@ class TestConvenienceMethods:
 
         import json
         meta = json.loads(created_index.description)
-        assert meta["document_type"] == "operational"
+        assert meta["document_category"] == "operational"
 
     @pytest.mark.asyncio
     async def test_create_operational_index_custom_dimension(self, adapter):
@@ -391,7 +391,7 @@ class TestConvenienceMethods:
 
     @pytest.mark.asyncio
     async def test_create_publication_index(self, adapter):
-        """Test convenience method sets document_type=publication."""
+        """Test convenience method sets document_category=publication."""
         adapter._client_wrapper.index_client = AsyncMock()
         adapter._client_wrapper.index_client.create_or_update_index = AsyncMock()
 
@@ -403,7 +403,7 @@ class TestConvenienceMethods:
 
         import json
         meta = json.loads(created_index.description)
-        assert meta["document_type"] == "publication"
+        assert meta["document_category"] == "publication"
 
         metadata_field = next(f for f in created_index.fields if f.name == "metadata")
         field_names = {f.name for f in metadata_field.fields}
@@ -413,18 +413,18 @@ class TestConvenienceMethods:
 
 
 class TestGetIndexDocumentType:
-    """Tests for document_type in get_index and list_indexes responses."""
+    """Tests for document_category in get_index and list_indexes responses."""
 
     @pytest.mark.asyncio
-    async def test_get_index_returns_document_type(self, adapter):
-        """Test that get_index includes document_type from description."""
+    async def test_get_index_returns_document_category(self, adapter):
+        """Test that get_index includes document_category from description."""
         import json
         from unittest.mock import MagicMock
 
         mock_index = MagicMock()
         mock_index.name = "ops-index"
         mock_index.description = json.dumps(
-            {"embedding_model": "text-embedding-3-small", "document_type": "operational"}
+            {"embedding_model": "text-embedding-3-small", "document_category": "operational"}
         )
         mock_index.fields = []
 
@@ -434,11 +434,33 @@ class TestGetIndexDocumentType:
 
         result = await adapter.get_index("ops-index")
 
-        assert result["document_type"] == "operational"
+        assert result["document_category"] == "operational"
+
+    @pytest.mark.asyncio
+    async def test_get_index_backward_compat_with_old_document_type_key(self, adapter):
+        """Test that get_index reads old 'document_type' key for backward compat."""
+        import json
+        from unittest.mock import MagicMock
+
+        mock_index = MagicMock()
+        mock_index.name = "legacy-index"
+        mock_index.description = json.dumps(
+            {"embedding_model": "text-embedding-3-small", "document_type": "operational"}
+        )
+        mock_index.fields = []
+
+        adapter._client_wrapper.index_client = AsyncMock()
+        adapter._client_wrapper.index_client.get_index = AsyncMock(return_value=mock_index)
+        adapter.get_document_count = AsyncMock(return_value=0)
+
+        result = await adapter.get_index("legacy-index")
+
+        # Backward compat: old 'document_type' key is promoted to 'document_category'
+        assert result["document_category"] == "operational"
 
     @pytest.mark.asyncio
     async def test_get_index_returns_none_when_description_missing(self, adapter):
-        """Test that get_index returns None when description has no document_type."""
+        """Test that get_index returns None when description is absent."""
         from unittest.mock import MagicMock
 
         mock_index = MagicMock()
@@ -452,13 +474,13 @@ class TestGetIndexDocumentType:
 
         result = await adapter.get_index("legacy-index")
 
-        assert result["document_type"] is None
+        assert result["document_category"] is None
         assert result["embedding_model"] is None
         assert result["vector_dimension"] is None
 
 
 class TestEnsureIndexDefaultsToOperational:
-    """Tests for ensure_index defaulting to operational document type."""
+    """Tests for ensure_index defaulting to operational document category."""
 
     @pytest.mark.asyncio
     async def test_ensure_index_creates_with_operational_default(self, adapter):
@@ -478,11 +500,11 @@ class TestEnsureIndexDefaultsToOperational:
 
         import json
         meta = json.loads(created_index.description)
-        assert meta["document_type"] == "operational"
+        assert meta["document_category"] == "operational"
 
     @pytest.mark.asyncio
-    async def test_ensure_index_respects_provided_document_type(self, adapter):
-        """Test that ensure_index uses the document_type from the provided schema."""
+    async def test_ensure_index_respects_provided_document_category(self, adapter):
+        """Test that ensure_index uses the document_category from the provided schema."""
         from azure.core.exceptions import ResourceNotFoundError
 
         adapter._client_wrapper.index_client = AsyncMock()
@@ -492,7 +514,7 @@ class TestEnsureIndexDefaultsToOperational:
         adapter._client_wrapper.index_client.create_or_update_index = AsyncMock()
 
         await adapter.ensure_index(
-            "pub-index", schema={"vector_dimension": 1536, "document_type": "publication"}
+            "pub-index", schema={"vector_dimension": 1536, "document_category": "publication"}
         )
 
         call_args = adapter._client_wrapper.index_client.create_or_update_index.call_args
@@ -500,4 +522,4 @@ class TestEnsureIndexDefaultsToOperational:
 
         import json
         meta = json.loads(created_index.description)
-        assert meta["document_type"] == "publication"
+        assert meta["document_category"] == "publication"

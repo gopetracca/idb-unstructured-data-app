@@ -23,7 +23,16 @@ class DocumentMetadata(BaseModel):
     """
 
     file_id: str = Field(..., description="File identifier (FK to files)")
-    document_type: str | None = Field(default=None, max_length=100)
+    document_category: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Schema discriminator: 'operational' or 'publication'",
+    )
+    document_type: str | None = Field(
+        default=None,
+        max_length=100,
+        description="User-facing document classification (e.g., 'PCR', 'Report', 'LP')",
+    )
     language: str | None = Field(default="en", max_length=10)
     country: str | None = Field(default=None, max_length=100)
     year: int | None = Field(default=None, ge=1900, le=2100)
@@ -140,21 +149,21 @@ METADATA_MODELS: dict[str, type[DocumentMetadata]] = {
 }
 
 
-def get_metadata_model(document_type: str | None) -> type[DocumentMetadata]:
-    """Get the validation model for a document type.
+def get_metadata_model(document_category: str | None) -> type[DocumentMetadata]:
+    """Get the validation model for a document category.
 
-    Falls back to OperationalDocumentMetadata for unknown/unspecified types
+    Falls back to OperationalDocumentMetadata for unknown/unspecified categories
     since all current documents in the system are operational documents.
 
     Args:
-        document_type: The document type string (e.g., "operational", "publication")
+        document_category: The document category string (e.g., "operational", "publication")
 
     Returns:
-        The appropriate DocumentMetadata subclass for the document type
+        The appropriate DocumentMetadata subclass for the document category
     """
-    if not document_type:
+    if not document_category:
         return OperationalDocumentMetadata
-    return METADATA_MODELS.get(document_type, DocumentMetadata)
+    return METADATA_MODELS.get(document_category, DocumentMetadata)
 
 
 def list_metadata_types() -> list[str]:

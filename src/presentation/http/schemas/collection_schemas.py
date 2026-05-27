@@ -28,9 +28,9 @@ class CreateCollectionRequest(BaseModel):
         min_length=1,
         max_length=100,
     )
-    document_type: str = Field(
+    document_category: str = Field(
         "operational",
-        description="Document type schema to use (e.g., 'operational', 'publication')",
+        description="Document category schema to use (e.g., 'operational', 'publication')",
         min_length=1,
         max_length=50,
     )
@@ -47,7 +47,7 @@ class CreateCollectionRequest(BaseModel):
                     "name": "embeddings",
                     "vector_dimension": 1536,
                     "embedding_model": "text-embedding-3-small",
-                    "document_type": "operational",
+                    "document_category": "operational",
                     "description": "Document embeddings for semantic search",
                 }
             ]

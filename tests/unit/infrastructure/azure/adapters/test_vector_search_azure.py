@@ -71,7 +71,7 @@ class TestAzureAISearchAdapter:
         adapter._client_wrapper.index_client.create_or_update_index = AsyncMock()
 
         result = await adapter.create_index(
-            "test-index", {"vector_dimension": 1536, "document_type": "operational"}
+            "test-index", {"vector_dimension": 1536, "document_category": "operational"}
         )
 
         assert result is True
@@ -85,7 +85,7 @@ class TestAzureAISearchAdapter:
 
         with pytest.raises(VectorDatabaseError) as exc_info:
             await adapter.create_index(
-                "test-index", {"vector_dimension": 1536, "document_type": "operational"}
+                "test-index", {"vector_dimension": 1536, "document_category": "operational"}
             )
 
         assert "Creation failed" in str(exc_info.value)
@@ -303,7 +303,7 @@ class TestAzureAISearchAdapter:
 
     def test_create_index_fields_includes_promoted_metadata(self, adapter):
         """Test that index schema includes all promoted metadata fields."""
-        fields = adapter._create_index_fields(vector_dimension=1536, document_type="operational")
+        fields = adapter._create_index_fields(vector_dimension=1536, document_category="operational")
 
         # Find metadata ComplexField
         metadata_field = next(f for f in fields if f.name == "metadata")
@@ -337,7 +337,7 @@ class TestAzureAISearchAdapter:
         """Test that promoted fields have correct data types."""
         from azure.search.documents.indexes.models import SearchFieldDataType
 
-        fields = adapter._create_index_fields(vector_dimension=1536, document_type="operational")
+        fields = adapter._create_index_fields(vector_dimension=1536, document_category="operational")
         metadata_field = next(f for f in fields if f.name == "metadata")
 
         # Create a mapping of field name to field object
@@ -357,7 +357,7 @@ class TestAzureAISearchAdapter:
 
     def test_create_index_fields_filterable_attributes(self, adapter):
         """Test that promoted fields are marked as filterable."""
-        fields = adapter._create_index_fields(vector_dimension=1536, document_type="operational")
+        fields = adapter._create_index_fields(vector_dimension=1536, document_category="operational")
         metadata_field = next(f for f in fields if f.name == "metadata")
         metadata_fields_map = {f.name: f for f in metadata_field.fields}
 
@@ -384,7 +384,7 @@ class TestAzureAISearchAdapter:
 
         Sortable fields are defined in the Index Schema Registry.
         """
-        fields = adapter._create_index_fields(vector_dimension=1536, document_type="operational")
+        fields = adapter._create_index_fields(vector_dimension=1536, document_category="operational")
         metadata_field = next(f for f in fields if f.name == "metadata")
         metadata_fields_map = {f.name: f for f in metadata_field.fields}
 

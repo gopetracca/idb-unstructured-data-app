@@ -25,6 +25,7 @@ class FileIndexFilters(BaseModel):
     Note: Full-text capabilities depend on the active metadata-store implementation.
     """
 
+    document_category: str | None = None
     document_type: str | None = None
     language: str | None = None
     operation_number: str | None = None

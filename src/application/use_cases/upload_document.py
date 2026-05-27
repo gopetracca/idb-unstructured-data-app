@@ -93,8 +93,8 @@ class UploadDocumentUseCase:
 
         # All metadata fields are promoted SQL columns — no flexible JSON split
         metadata_dict = input_dto.metadata
-        document_type = metadata_dict.get("document_type")
-        model_class = get_metadata_model(document_type)
+        document_category = metadata_dict.get("document_category")
+        model_class = get_metadata_model(document_category)
         promoted_names = model_class.promoted_field_names()
 
         promoted = {k: v for k, v in metadata_dict.items() if k in promoted_names}

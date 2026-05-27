@@ -33,7 +33,7 @@ from src.core.errors import (
     VectorDatabaseError,
     VectorDimensionMismatchError,
 )
-from src.core.index_schemas import get_index_schema, list_document_types
+from src.core.index_schemas import get_index_schema, list_document_categories
 from src.infrastructure.azure.adapters.index_schema_mapper import to_azure_search_field
 from src.core.value_objects.searchable_metadata import SearchableMetadata
 from src.core.value_objects.search_mode import SearchMode
@@ -122,7 +122,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             ),
         ]
 
-    def _create_metadata_fields(self, document_type: str) -> list[SearchField]:
+    def _create_metadata_fields(self, document_category: str) -> list[SearchField]:
         """
         Create metadata fields from the Index Schema Registry.
 
@@ -130,36 +130,36 @@ class AzureAISearchAdapter(VectorDatabasePort):
         objects for the metadata ComplexField.
 
         Args:
-            document_type: Type of document (e.g., "operational", "publication")
+            document_category: Category of document (e.g., "operational", "publication")
 
         Returns:
             List of SearchField definitions for the metadata ComplexField
         """
-        schema = get_index_schema(document_type)
+        schema = get_index_schema(document_category)
         fields = [to_azure_search_field(spec) for spec in schema]
         logger.debug(
-            f"Created {len(fields)} metadata fields from registry for '{document_type}'"
+            f"Created {len(fields)} metadata fields from registry for '{document_category}'"
         )
         return fields
 
     def _create_index_fields(
-        self, vector_dimension: int, document_type: str
+        self, vector_dimension: int, document_category: str
     ) -> list[SearchField]:
         """
-        Assemble the full set of index fields for a document type.
+        Assemble the full set of index fields for a document category.
 
-        Combines the fixed base fields with the document-type-specific metadata
+        Combines the fixed base fields with the category-specific metadata
         ComplexField generated from the Index Schema Registry.
 
         Args:
             vector_dimension: Dimensionality of the embedding vectors
-            document_type: Type of document for schema selection (default: "operational")
+            document_category: Category of document for schema selection (e.g., "operational")
 
         Returns:
             List of SearchField definitions for the index schema
         """
         base_fields = self._create_base_fields(vector_dimension)
-        metadata_fields = self._create_metadata_fields(document_type)
+        metadata_fields = self._create_metadata_fields(document_category)
         return base_fields + [ComplexField(name="metadata", fields=metadata_fields)]
 
     async def create_index(self, index_name: str, schema: dict[str, Any]) -> bool:
@@ -169,7 +169,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
         Args:
             index_name: Name of the index to create
             schema: Schema configuration with the following keys:
-                - document_type (str): REQUIRED. Type of documents this index will hold
+                - document_category (str): REQUIRED. Category of documents this index will hold
                   (e.g., "operational", "publication")
                 - vector_dimension (int): Embedding vector size (default: 1536)
                 - embedding_model (str): Model name (default: "text-embedding-3-small")
@@ -178,7 +178,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             True if index was created successfully
 
         Raises:
-            ValueError: If document_type is missing or not recognized
+            ValueError: If document_category is missing or not recognized
             IndexAlreadyExistsError: If index already exists
             VectorDatabaseError: If creation fails
         """
@@ -186,28 +186,28 @@ class AzureAISearchAdapter(VectorDatabasePort):
             vector_dimension = schema.get("vector_dimension", 1536)
             embedding_model = schema.get("embedding_model", "text-embedding-3-small")
 
-            document_type = schema.get("document_type")
-            if not document_type:
+            document_category = schema.get("document_category")
+            if not document_category:
                 raise ValueError(
-                    "schema must include 'document_type' "
-                    f"(available: {', '.join(list_document_types())})"
+                    "schema must include 'document_category' "
+                    f"(available: {', '.join(list_document_categories())})"
                 )
 
-            # Validate document_type against registry
-            available_types = list_document_types()
-            if document_type not in available_types:
+            # Validate document_category against registry
+            available_categories = list_document_categories()
+            if document_category not in available_categories:
                 raise ValueError(
-                    f"Unknown document_type: '{document_type}'. "
-                    f"Available types: {', '.join(available_types)}"
+                    f"Unknown document_category: '{document_category}'. "
+                    f"Available categories: {', '.join(available_categories)}"
                 )
 
             logger.info(
                 f"Creating index '{index_name}' with vector dimension: {vector_dimension}, "
-                f"embedding model: {embedding_model}, document_type: {document_type}"
+                f"embedding model: {embedding_model}, document_category: {document_category}"
             )
 
-            # Define index fields using helper method with document_type
-            fields = self._create_index_fields(vector_dimension, document_type)
+            # Define index fields using helper method with document_category
+            fields = self._create_index_fields(vector_dimension, document_category)
 
             # Configure HNSW vector search
             vector_search = VectorSearch(
@@ -234,7 +234,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             # at creation time; use configure_reranker() to enable it later.
             metadata = {
                 "embedding_model": embedding_model,
-                "document_type": document_type,
+                "document_category": document_category,
                 "reranker_enabled": False,
                 "semantic_configuration_name": None,
             }
@@ -257,7 +257,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             return True
 
         except ValueError:
-            raise  # Validation errors (missing/unknown document_type) bubble up as-is
+            raise  # Validation errors (missing/unknown document_category) bubble up as-is
         except ResourceNotFoundError as e:
             logger.error("Index creation failed - resource not found: %s", e, exc_info=True)
             raise VectorDatabaseError(
@@ -296,7 +296,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             index_name,
             {
                 "vector_dimension": vector_dimension,
-                "document_type": "operational",
+                "document_category": "operational",
                 "embedding_model": embedding_model,
             },
         )
@@ -324,7 +324,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
             index_name,
             {
                 "vector_dimension": vector_dimension,
-                "document_type": "publication",
+                "document_category": "publication",
                 "embedding_model": embedding_model,
             },
         )
@@ -1071,9 +1071,9 @@ class AzureAISearchAdapter(VectorDatabasePort):
         except ResourceNotFoundError:
             # Index doesn't exist, create it
             logger.info("Index '%s' not found, creating...", index_name)
-            schema = schema or {"vector_dimension": 1536, "document_type": "operational"}
-            if "document_type" not in schema:
-                schema = {**schema, "document_type": "operational"}
+            schema = schema or {"vector_dimension": 1536, "document_category": "operational"}
+            if "document_category" not in schema:
+                schema = {**schema, "document_category": "operational"}
             return await self.create_index(index_name, schema)
         except Exception as e:
             logger.error("Failed to ensure index '%s': %s", index_name, e, exc_info=True)
@@ -1154,14 +1154,15 @@ class AzureAISearchAdapter(VectorDatabasePort):
 
                 # Extract metadata from description JSON
                 embedding_model: str | None = None
-                document_type: str | None = None
+                document_category: str | None = None
                 reranker_enabled: bool = False
                 semantic_configuration_name: str | None = None
                 if index.description:
                     try:
                         meta = json.loads(index.description)
                         embedding_model = meta.get("embedding_model")
-                        document_type = meta.get("document_type")
+                        # Support both old key "document_type" and new key "document_category"
+                        document_category = meta.get("document_category") or meta.get("document_type")
                         reranker_enabled = bool(meta.get("reranker_enabled", False))
                         semantic_configuration_name = meta.get("semantic_configuration_name")
                     except json.JSONDecodeError:
@@ -1181,7 +1182,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
                         "name": index.name,
                         "vector_dimension": vector_dimension,
                         "embedding_model": embedding_model,
-                        "document_type": document_type,
+                        "document_category": document_category,
                         "reranker_enabled": reranker_enabled,
                         "semantic_configuration_name": semantic_configuration_name,
                         "document_count": doc_count,
@@ -1229,14 +1230,15 @@ class AzureAISearchAdapter(VectorDatabasePort):
 
             # Extract metadata from description JSON
             embedding_model: str | None = None
-            document_type: str | None = None
+            document_category: str | None = None
             reranker_enabled: bool = False
             semantic_configuration_name: str | None = None
             if index.description:
                 try:
                     meta = json.loads(index.description)
                     embedding_model = meta.get("embedding_model")
-                    document_type = meta.get("document_type")
+                    # Support both old key "document_type" and new key "document_category"
+                    document_category = meta.get("document_category") or meta.get("document_type")
                     reranker_enabled = bool(meta.get("reranker_enabled", False))
                     semantic_configuration_name = meta.get("semantic_configuration_name")
                 except json.JSONDecodeError:
@@ -1252,7 +1254,7 @@ class AzureAISearchAdapter(VectorDatabasePort):
                 "name": index.name,
                 "vector_dimension": vector_dimension,
                 "embedding_model": embedding_model,
-                "document_type": document_type,
+                "document_category": document_category,
                 "reranker_enabled": reranker_enabled,
                 "semantic_configuration_name": semantic_configuration_name,
                 "document_count": doc_count,

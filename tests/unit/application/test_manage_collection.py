@@ -56,7 +56,7 @@ class TestCreateCollection:
 
         mock_vector_database.create_index.assert_called_once_with(
             "test-collection",
-            {"vector_dimension": 1536, "embedding_model": "text-embedding-3-small", "document_type": "operational"}
+            {"vector_dimension": 1536, "embedding_model": "text-embedding-3-small", "document_category": "operational"}
         )
 
     async def test_create_collection_already_exists(

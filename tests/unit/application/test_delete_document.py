@@ -10,7 +10,7 @@ from src.application.use_cases.delete_document import DeleteDocumentUseCase
 from src.core.entities.composites import DocumentComplete
 from src.core.entities.document import Document
 from src.core.entities.pipeline_state import PipelineState
-from src.core.errors import DocumentNotFoundError, StorageError
+from src.core.errors import DocumentNotFoundError, IndexNotFoundError, StorageError
 from src.core.value_objects.document_metadata import DocumentMetadata
 
 
@@ -111,9 +111,9 @@ class TestDeleteDocumentUseCase:
         )
         assert mock_blob_store.delete_by_prefix.call_count == 4
 
-        # Vector index must be cleaned up
+        # Vector index must be cleaned up using the document's own collection
         mock_vector_database.delete_by_file_id.assert_called_once_with(
-            "test-index", "file-456"
+            "test-collection", "file-456"
         )
 
         # SQL metadata must be deleted
@@ -213,6 +213,60 @@ class TestDeleteDocumentUseCase:
         result = await use_case.execute(input_dto)
 
         assert result.deleted_at >= before_delete
+
+    async def test_missing_vector_index_does_not_block_metadata_deletion(
+        self,
+        use_case: DeleteDocumentUseCase,
+        mock_vector_database: AsyncMock,
+        mock_metadata_store: AsyncMock,
+    ) -> None:
+        """IndexNotFoundError is logged as a warning and does not block SQL cleanup."""
+        mock_vector_database.delete_by_file_id.side_effect = IndexNotFoundError(
+            "test-collection"
+        )
+
+        input_dto = DeleteDocumentInput(
+            tenant_id="tenant-123",
+            file_id="file-456",
+        )
+
+        result = await use_case.execute(input_dto)
+
+        assert result.file_id == "file-456"
+        mock_metadata_store.delete.assert_called_once_with("tenant-123", "file-456")
+
+    async def test_falls_back_to_default_index_when_collection_name_missing(
+        self,
+        mock_blob_store: AsyncMock,
+        mock_metadata_store: AsyncMock,
+        mock_vector_database: AsyncMock,
+        sample_document_complete: DocumentComplete,
+    ) -> None:
+        """When collection_name is not set on the document, fall back to the configured default index."""
+        sample_document_complete.document.collection_name = None
+        mock_metadata_store.get_by_id.return_value = sample_document_complete
+
+        use_case = DeleteDocumentUseCase(
+            blob_store=mock_blob_store,
+            metadata_store=mock_metadata_store,
+            vector_database=mock_vector_database,
+            container_raw="raw",
+            container_text="text",
+            container_chunks="chunks",
+            container_embeddings="embeddings",
+            index_name="default-index",
+        )
+
+        input_dto = DeleteDocumentInput(
+            tenant_id="tenant-123",
+            file_id="file-456",
+        )
+
+        await use_case.execute(input_dto)
+
+        mock_vector_database.delete_by_file_id.assert_called_once_with(
+            "default-index", "file-456"
+        )
 
     async def test_partial_blob_failure_still_attempts_all_containers(
         self,
