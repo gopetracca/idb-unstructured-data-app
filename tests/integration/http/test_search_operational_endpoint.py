@@ -192,12 +192,12 @@ async def test_operational_search_include_metadata_false_omits_metadata(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_operational_search_injects_document_type(
+async def test_operational_search_endpoint_calls_adapter(
     search_use_case: SearchUseCase,
     mock_vector_database: AsyncMock,
     mock_embedding_port: AsyncMock,
 ) -> None:
-    """document_type must be hard-coded to 'operational' regardless of request body."""
+    """Operational search endpoint returns 200 and calls the vector database adapter."""
     _stub_search(mock_vector_database, mock_embedding_port)
 
     container = Container()
@@ -214,11 +214,7 @@ async def test_operational_search_injects_document_type(
             )
 
     assert response.status_code == 200, response.json()
-
-    call_kwargs = mock_vector_database.search.call_args[1]
-    # The DTO passed to the adapter must carry document_type="operational"
-    assert call_kwargs.get("filters", {}).get("document_type") == "operational" or True
-    # Verify via the DTO that was built — check search was called (document_type is in DTO)
+    # Verify the adapter was called — document_type is now an optional user filter (not hardcoded)
     assert mock_vector_database.search.called
 
 
