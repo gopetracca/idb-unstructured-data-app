@@ -30,6 +30,7 @@ class SearchResultMetadata(BaseModel):
     operation_number: str | None = Field(default=None)
 
     # Document-level descriptors
+    document_type: str | None = Field(default=None)
     document_author: str | None = Field(default=None)
     country: str | None = Field(default=None)
     sector: str | None = Field(default=None)
@@ -50,6 +51,7 @@ class SearchResultMetadata(BaseModel):
             section_path=searchable.section_path,
             ezshare_id=searchable.ezshare_id,
             operation_number=getattr(searchable, "operation_number", None),
+            document_type=searchable.document_type,
             document_author=searchable.document_author,
             country=searchable.country,
             sector=getattr(searchable, "sector", None),
