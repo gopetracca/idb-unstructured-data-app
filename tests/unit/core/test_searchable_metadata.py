@@ -329,6 +329,7 @@ class TestSearchResultMetadata:
         assert result.ezshare_id == "EZSHARE-999"
         assert result.section_path == "Executive Summary"
         assert result.year == 2023
+        assert result.document_type == "report"
 
     def test_from_searchable_all_none(self) -> None:
         sm = SearchableMetadata()
