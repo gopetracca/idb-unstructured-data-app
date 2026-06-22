@@ -46,8 +46,8 @@ class UpdateMetadataUseCase:
         if doc is None:
             raise DocumentNotFoundError(input_dto.file_id, input_dto.tenant_id)
 
-        # Get promoted fields for this document type
-        model_class = get_metadata_model(doc.metadata.document_type)
+        # Get promoted fields for this document category (schema discriminator)
+        model_class = get_metadata_model(doc.metadata.document_category)
         promoted_names = model_class.promoted_field_names()
 
         # Apply all updates that match promoted fields on DocumentMetadata

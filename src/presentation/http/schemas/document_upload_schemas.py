@@ -42,6 +42,12 @@ class OperationalDocumentUploadForm(BaseModel):
     description: str | None = Field(default=None, description="Document description")
     tags: str | None = Field(default=None, description="Comma-separated tags")
 
+    # User-facing document type (e.g., PCR, Report, LP)
+    document_type: str | None = Field(
+        default=None,
+        description="Document type classification (e.g., PCR, Report, LP, MIC)",
+    )
+
     # Operational-specific fields
     operation_number: str | None = Field(
         default=None, description="Operation number (e.g., UR-P1180)"
@@ -127,6 +133,11 @@ class OperationalDocumentUploadForm(BaseModel):
             str | None,
             Form(description="Comma-separated tags"),
         ] = None,
+        # User-facing document type
+        document_type: Annotated[
+            str | None,
+            Form(description="Document type classification (e.g., PCR, Report, LP, MIC)"),
+        ] = None,
         # Operational-specific fields
         operation_number: Annotated[
             str | None,
@@ -164,6 +175,7 @@ class OperationalDocumentUploadForm(BaseModel):
             department=department,
             description=description,
             tags=tags,
+            document_type=document_type,
             operation_number=operation_number,
             sector=sector,
             operation_type=operation_type,
@@ -173,10 +185,13 @@ class OperationalDocumentUploadForm(BaseModel):
     def to_metadata_dict(self) -> dict:
         """Convert form data to metadata dictionary for use case input.
 
-        Sets document_type to 'operational' and parses tags from comma-separated string.
+        Injects document_category='operational' (schema discriminator) and preserves
+        any user-provided document_type (e.g. 'PCR', 'Report'). Parses tags from
+        comma-separated string.
         """
         data = self.model_dump(exclude={"collection_name", "ezshare_id"}, exclude_none=True)
-        data["document_type"] = "operational"
+        # Inject schema discriminator — does not overwrite user-provided document_type
+        data["document_category"] = "operational"
 
         # Parse tags from comma-separated string
         if "tags" in data and isinstance(data["tags"], str):
@@ -215,6 +230,12 @@ class PublicationDocumentUploadForm(BaseModel):
     department: str | None = Field(default=None, description="Department")
     description: str | None = Field(default=None, description="Document description")
     tags: str | None = Field(default=None, description="Comma-separated tags")
+
+    # User-facing document type (e.g., journal_article, working_paper)
+    document_type: str | None = Field(
+        default=None,
+        description="Document type classification (e.g., journal_article, working_paper, book_chapter)",
+    )
 
     # Publication-specific fields
     journal: str | None = Field(
@@ -308,6 +329,11 @@ class PublicationDocumentUploadForm(BaseModel):
             str | None,
             Form(description="Comma-separated tags"),
         ] = None,
+        # User-facing document type
+        document_type: Annotated[
+            str | None,
+            Form(description="Document type classification (e.g., journal_article, working_paper, book_chapter)"),
+        ] = None,
         # Publication-specific fields
         journal: Annotated[
             str | None,
@@ -353,6 +379,7 @@ class PublicationDocumentUploadForm(BaseModel):
             department=department,
             description=description,
             tags=tags,
+            document_type=document_type,
             journal=journal,
             doi=doi,
             issn=issn,
@@ -364,10 +391,13 @@ class PublicationDocumentUploadForm(BaseModel):
     def to_metadata_dict(self) -> dict:
         """Convert form data to metadata dictionary for use case input.
 
-        Sets document_type to 'publication' and parses tags from comma-separated string.
+        Injects document_category='publication' (schema discriminator) and preserves
+        any user-provided document_type (e.g. 'journal_article'). Parses tags from
+        comma-separated string.
         """
         data = self.model_dump(exclude={"collection_name", "ezshare_id"}, exclude_none=True)
-        data["document_type"] = "publication"
+        # Inject schema discriminator — does not overwrite user-provided document_type
+        data["document_category"] = "publication"
 
         # Parse tags from comma-separated string
         if "tags" in data and isinstance(data["tags"], str):

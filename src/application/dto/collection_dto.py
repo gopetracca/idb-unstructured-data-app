@@ -20,9 +20,9 @@ class CreateCollectionInput(BaseModel):
         min_length=1,
         max_length=1536
     )
-    document_type: str = Field(
+    document_category: str = Field(
         "operational",
-        description="Document type schema to use (e.g., 'operational', 'publication')",
+        description="Document category schema to use (e.g., 'operational', 'publication')",
     )
     description: str | None = Field(None, description="Optional collection description")
     correlation_id: str = Field(..., description="Correlation ID for tracing")

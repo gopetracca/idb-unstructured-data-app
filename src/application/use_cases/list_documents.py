@@ -34,8 +34,9 @@ class ListDocumentsUseCase:
         filtering on JSON metadata fields for optimal performance.
         """
         # Build promoted field filters for server-side filtering
-        # document_type is now a promoted field (SQL column), not in-memory
+        # document_category selects the metadata model; document_type is user-facing classification
         promoted_filters = FileIndexFilters(
+            document_category=input_dto.document_category,
             document_type=input_dto.document_type,
             operation_number=input_dto.operation_number,
             country=input_dto.country,

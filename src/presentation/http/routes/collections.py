@@ -118,7 +118,7 @@ async def create_collection(
             name=request.name,
             vector_dimension=request.vector_dimension,
             embedding_model=request.embedding_model,
-            document_type=request.document_type,
+            document_category=request.document_category,
             description=request.description,
             correlation_id=correlation_id,
         )

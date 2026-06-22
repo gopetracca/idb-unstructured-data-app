@@ -38,14 +38,16 @@ class TestOperationalDocumentUploadForm:
         assert form.operation_type == "Loan"
         assert form.dept_id == "INE/TSP"
 
-    def test_to_metadata_dict_sets_document_type(self) -> None:
-        """to_metadata_dict should inject document_type='operational'."""
+    def test_to_metadata_dict_sets_document_category(self) -> None:
+        """to_metadata_dict should inject document_category='operational' (schema discriminator)."""
         form = OperationalDocumentUploadForm(
             collection_name="ops-docs",
             ezshare_id="EZSHARE-123-456",
         )
         metadata = form.to_metadata_dict()
-        assert metadata["document_type"] == "operational"
+        assert metadata["document_category"] == "operational"
+        # document_type is user-provided (e.g. PCR, Report), not hardcoded
+        assert "document_type" not in metadata or metadata.get("document_type") is None
 
     def test_to_metadata_dict_excludes_routing_fields(self) -> None:
         """collection_name and ezshare_id should NOT appear in metadata dict."""
@@ -137,14 +139,16 @@ class TestPublicationDocumentUploadForm:
         assert form.peer_reviewed is True
         assert form.publication_type == "journal_article"
 
-    def test_to_metadata_dict_sets_document_type(self) -> None:
-        """to_metadata_dict should inject document_type='publication'."""
+    def test_to_metadata_dict_sets_document_category(self) -> None:
+        """to_metadata_dict should inject document_category='publication' (schema discriminator)."""
         form = PublicationDocumentUploadForm(
             collection_name="publications",
             ezshare_id="EZSHARE-789-012",
         )
         metadata = form.to_metadata_dict()
-        assert metadata["document_type"] == "publication"
+        assert metadata["document_category"] == "publication"
+        # document_type is user-provided (e.g. journal_article), not hardcoded
+        assert "document_type" not in metadata or metadata.get("document_type") is None
 
     def test_to_metadata_dict_excludes_routing_fields(self) -> None:
         """collection_name and ezshare_id should NOT appear in metadata dict."""

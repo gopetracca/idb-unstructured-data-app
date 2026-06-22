@@ -107,7 +107,8 @@ class ListDocumentsInput(BaseModel):
     cursor: str | None = Field(default=None, description="Pagination cursor")
 
     # Metadata filters (all stored as SQL columns in file_metadata)
-    document_type: str | None = Field(default=None, description="Filter by document type")
+    document_category: str | None = Field(default=None, description="Filter by document category (e.g., 'operational', 'publication')")
+    document_type: str | None = Field(default=None, description="Filter by document type (e.g., 'PCR', 'Report')")
     tags: list[str] | None = Field(default=None, description="Filter by tags")
     source: str | None = Field(default=None, description="Filter by source")
     department: str | None = Field(default=None, description="Filter by department")

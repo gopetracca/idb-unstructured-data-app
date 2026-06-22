@@ -29,30 +29,33 @@ from src.core.index_schemas.document_types.publication import PUBLICATION_INDEX_
 # Base fields included in every index (common + chunk)
 _BASE_FIELDS: tuple[IndexFieldSpec, ...] = COMMON_INDEX_FIELDS + CHUNK_INDEX_FIELDS
 
-# Registry mapping document type -> type-specific fields
-_DOCUMENT_TYPE_FIELDS: dict[str, tuple[IndexFieldSpec, ...]] = {
+# Registry mapping document category -> category-specific fields
+_DOCUMENT_CATEGORY_FIELDS: dict[str, tuple[IndexFieldSpec, ...]] = {
     "operational": OPERATIONAL_INDEX_FIELDS,
     "publication": PUBLICATION_INDEX_FIELDS,
 }
 
+# Backward-compatible alias
+_DOCUMENT_TYPE_FIELDS = _DOCUMENT_CATEGORY_FIELDS
 
-def get_index_schema(document_type: str) -> tuple[IndexFieldSpec, ...]:
+
+def get_index_schema(document_category: str) -> tuple[IndexFieldSpec, ...]:
     """
-    Get the complete index schema for a document type.
+    Get the complete index schema for a document category.
 
     Returns the combined schema of:
-    - Common fields (all document types)
-    - Chunk-level fields (all document types)
-    - Document-type-specific fields
+    - Common fields (all document categories)
+    - Chunk-level fields (all document categories)
+    - Category-specific fields
 
     Args:
-        document_type: Type of document (e.g., "operational", "publication")
+        document_category: Category of document (e.g., "operational", "publication")
 
     Returns:
         Tuple of IndexFieldSpec defining all metadata fields for the index
 
     Raises:
-        ValueError: If document_type is not registered
+        ValueError: If document_category is not registered
 
     Example:
         >>> schema = get_index_schema("operational")
@@ -61,13 +64,13 @@ def get_index_schema(document_type: str) -> tuple[IndexFieldSpec, ...]:
         >>> assert "page_number" in field_names  # chunk field
         >>> assert "country" in field_names       # common field
     """
-    if document_type not in _DOCUMENT_TYPE_FIELDS:
-        available = ", ".join(sorted(_DOCUMENT_TYPE_FIELDS.keys()))
+    if document_category not in _DOCUMENT_CATEGORY_FIELDS:
+        available = ", ".join(sorted(_DOCUMENT_CATEGORY_FIELDS.keys()))
         raise ValueError(
-            f"Unknown document type: '{document_type}'. Available types: {available}"
+            f"Unknown document category: '{document_category}'. Available categories: {available}"
         )
 
-    type_specific = _DOCUMENT_TYPE_FIELDS[document_type]
+    type_specific = _DOCUMENT_CATEGORY_FIELDS[document_category]
     return _BASE_FIELDS + type_specific
 
 
@@ -84,81 +87,86 @@ def get_base_schema() -> tuple[IndexFieldSpec, ...]:
     return _BASE_FIELDS
 
 
-def get_type_specific_schema(document_type: str) -> tuple[IndexFieldSpec, ...]:
+def get_type_specific_schema(document_category: str) -> tuple[IndexFieldSpec, ...]:
     """
-    Get only the type-specific fields for a document type.
+    Get only the category-specific fields for a document category.
 
-    Useful for understanding what fields are unique to a document type.
+    Useful for understanding what fields are unique to a document category.
 
     Args:
-        document_type: Type of document
+        document_category: Category of document
 
     Returns:
-        Tuple of IndexFieldSpec for type-specific fields only.
+        Tuple of IndexFieldSpec for category-specific fields only.
 
     Raises:
-        ValueError: If document_type is not registered
+        ValueError: If document_category is not registered
     """
-    if document_type not in _DOCUMENT_TYPE_FIELDS:
-        available = ", ".join(sorted(_DOCUMENT_TYPE_FIELDS.keys()))
+    if document_category not in _DOCUMENT_CATEGORY_FIELDS:
+        available = ", ".join(sorted(_DOCUMENT_CATEGORY_FIELDS.keys()))
         raise ValueError(
-            f"Unknown document type: '{document_type}'. Available types: {available}"
+            f"Unknown document category: '{document_category}'. Available categories: {available}"
         )
-    return _DOCUMENT_TYPE_FIELDS[document_type]
+    return _DOCUMENT_CATEGORY_FIELDS[document_category]
+
+
+def list_document_categories() -> list[str]:
+    """Return list of registered document categories."""
+    return sorted(_DOCUMENT_CATEGORY_FIELDS.keys())
 
 
 def list_document_types() -> list[str]:
-    """Return list of registered document types."""
-    return sorted(_DOCUMENT_TYPE_FIELDS.keys())
+    """Return list of registered document categories (alias for backward compatibility)."""
+    return list_document_categories()
 
 
-def get_field_by_name(document_type: str, field_name: str) -> IndexFieldSpec | None:
+def get_field_by_name(document_category: str, field_name: str) -> IndexFieldSpec | None:
     """
-    Get a specific field spec by name from a document type's schema.
+    Get a specific field spec by name from a document category's schema.
 
     Args:
-        document_type: Type of document
+        document_category: Category of document
         field_name: Name of the field to find
 
     Returns:
         IndexFieldSpec if found, None otherwise
     """
-    schema = get_index_schema(document_type)
+    schema = get_index_schema(document_category)
     for field in schema:
         if field.name == field_name:
             return field
     return None
 
 
-def get_filterable_fields(document_type: str) -> tuple[IndexFieldSpec, ...]:
+def get_filterable_fields(document_category: str) -> tuple[IndexFieldSpec, ...]:
     """
-    Get all filterable fields for a document type.
+    Get all filterable fields for a document category.
 
     Useful for building filter UIs or validating filter parameters.
 
     Args:
-        document_type: Type of document
+        document_category: Category of document
 
     Returns:
         Tuple of IndexFieldSpec where filterable=True
     """
-    schema = get_index_schema(document_type)
+    schema = get_index_schema(document_category)
     return tuple(f for f in schema if f.filterable)
 
 
-def get_sortable_fields(document_type: str) -> tuple[IndexFieldSpec, ...]:
+def get_sortable_fields(document_category: str) -> tuple[IndexFieldSpec, ...]:
     """
-    Get all sortable fields for a document type.
+    Get all sortable fields for a document category.
 
     Useful for building sort UIs or validating sort parameters.
 
     Args:
-        document_type: Type of document
+        document_category: Category of document
 
     Returns:
         Tuple of IndexFieldSpec where sortable=True
     """
-    schema = get_index_schema(document_type)
+    schema = get_index_schema(document_category)
     return tuple(f for f in schema if f.sortable)
 
 
@@ -172,7 +180,8 @@ __all__ = [
     "get_index_schema",
     "get_base_schema",
     "get_type_specific_schema",
-    "list_document_types",
+    "list_document_categories",
+    "list_document_types",  # backward-compatible alias
     "get_field_by_name",
     "get_filterable_fields",
     "get_sortable_fields",

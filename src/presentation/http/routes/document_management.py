@@ -140,9 +140,11 @@ async def upload_document(
             },
         )
 
-    # Build final metadata dict from validated model, injecting document_type
+    # Build final metadata dict from validated model, injecting document_category
+    # The `document_type` form field on this (deprecated) generic endpoint acts as the
+    # schema selector — its value IS the document_category (e.g. "operational", "publication").
     metadata_dict = validated.model_dump(exclude={"file_id"}, exclude_none=True)
-    metadata_dict["document_type"] = document_type
+    metadata_dict["document_category"] = document_type  # inject as discriminator field
 
     chunking_strategy_model = chunking_strategy.to_chunking_strategy()
 

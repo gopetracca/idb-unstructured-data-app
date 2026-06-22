@@ -14,7 +14,7 @@ COMMON_INDEX_FIELDS: tuple[IndexFieldSpec, ...] = (
         field_type=FieldType.STRING,
         filterable=True,
         category=FieldCategory.COMMON,
-        description="Discriminator for document type (operational, publication, etc.)",
+        description="User-facing document type (e.g., PCR, Report, LP, journal_article)",
     ),
     IndexFieldSpec(
         name="collection_name",

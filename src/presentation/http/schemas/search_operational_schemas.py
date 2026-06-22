@@ -45,6 +45,12 @@ class OperationalSearchRequest(BaseSearchRequest):
         description="Sort field for results (defaults to score desc)",
     )
 
+    # User-facing document type filter (e.g., PCR, Report, LP)
+    document_type: str | None = Field(
+        None,
+        description="Filter by document type (e.g., PCR, Report, LP, MIC)",
+    )
+
     # Operational-specific filters
     operation_number: str | None = Field(
         None,

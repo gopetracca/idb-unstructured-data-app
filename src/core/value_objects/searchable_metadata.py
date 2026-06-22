@@ -14,7 +14,7 @@ The hierarchy follows the document type structure:
 """
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -86,7 +86,7 @@ class OperationalSearchableMetadata(BaseSearchableMetadata):
     Adds operational-specific fields like operation_number, sector, etc.
     """
 
-    document_type: Literal["operational"] | str | None = Field(default="operational")
+    document_type: str | None = Field(default=None)
 
     # --- Operational-specific fields ---
     operation_number: str | None = Field(default=None)
@@ -108,7 +108,7 @@ class PublicationSearchableMetadata(BaseSearchableMetadata):
     Adds publication-specific fields like journal, doi, etc.
     """
 
-    document_type: Literal["publication"] | str | None = Field(default="publication")
+    document_type: str | None = Field(default=None)
 
     # --- Publication-specific fields ---
     journal: str | None = Field(default=None)
@@ -131,20 +131,20 @@ SEARCHABLE_METADATA_MODELS: dict[str, type[BaseSearchableMetadata]] = {
 
 
 def get_searchable_metadata_model(
-    document_type: str | None,
+    document_category: str | None,
 ) -> type[BaseSearchableMetadata]:
-    """Get the SearchableMetadata subclass for a document type.
+    """Get the SearchableMetadata subclass for a document category.
 
     Args:
-        document_type: Document type string (e.g., "operational", "publication")
+        document_category: Document category string (e.g., "operational", "publication")
 
     Returns:
         The appropriate SearchableMetadata subclass.
-        Defaults to OperationalSearchableMetadata for unknown/None types.
+        Defaults to OperationalSearchableMetadata for unknown/None categories.
     """
-    if not document_type:
+    if not document_category:
         return OperationalSearchableMetadata
-    return SEARCHABLE_METADATA_MODELS.get(document_type, OperationalSearchableMetadata)
+    return SEARCHABLE_METADATA_MODELS.get(document_category, OperationalSearchableMetadata)
 
 
 def create_searchable_metadata(
@@ -169,8 +169,8 @@ def create_searchable_metadata(
     Returns:
         The appropriate SearchableMetadata subclass instance.
     """
-    document_type = getattr(doc_metadata, "document_type", None)
-    model_class = get_searchable_metadata_model(document_type)
+    document_category = getattr(doc_metadata, "document_category", None)
+    model_class = get_searchable_metadata_model(document_category)
 
     # Build common kwargs
     kwargs = _build_common_kwargs(

@@ -40,10 +40,15 @@ class MetadataSchema(BaseModel):
     )
 
     # Promoted fields (from file_metadata SQL columns)
+    document_category: str | None = Field(
+        None,
+        description="Schema discriminator: 'operational' or 'publication'",
+        examples=["operational", "publication"],
+    )
     document_type: str | None = Field(
         None,
-        description="Type of document",
-        examples=["policy", "report", "memo", "contract"],
+        description="User-facing document classification (e.g., PCR, Report, LP)",
+        examples=["PCR", "Report", "LP", "MIC"],
     )
     language: str | None = Field(
         default="en",
@@ -96,7 +101,8 @@ class UpdateMetadataRequest(BaseModel):
     description: str | None = Field(None, description="Document description")
 
     # Promoted fields (stored in SQL columns)
-    document_type: str | None = Field(None, description="Type of document")
+    document_category: str | None = Field(None, description="Schema discriminator (operational, publication)")
+    document_type: str | None = Field(None, description="User-facing document classification (e.g., PCR, Report)")
     language: str | None = Field(None, description="ISO 639-1 language code")
     operation_number: str | None = Field(None, description="Operation number")
     country: str | None = Field(None, description="Country")

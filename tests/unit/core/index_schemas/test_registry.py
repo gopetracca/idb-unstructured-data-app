@@ -111,8 +111,8 @@ class TestGetIndexSchema:
         assert "issn" not in field_names
 
     def test_unknown_type_raises_error(self):
-        """Test that unknown document type raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown document type: 'unknown'"):
+        """Test that unknown document category raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown document category: 'unknown'"):
             get_index_schema("unknown")
 
     def test_error_message_includes_available_types(self):
@@ -192,8 +192,8 @@ class TestGetTypeSpecificSchema:
         assert schema == PUBLICATION_INDEX_FIELDS
 
     def test_unknown_type_raises_error(self):
-        """Test that unknown document type raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown document type"):
+        """Test that unknown document category raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown document category"):
             get_type_specific_schema("unknown")
 
 

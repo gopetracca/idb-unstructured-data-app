@@ -364,6 +364,7 @@ class FileIndexRepositorySQLServer:
         filter_dict = filters.model_dump(exclude_none=True)
 
         field_mapping = {
+            "document_category": FileMetadataTable.document_category,
             "document_type": FileMetadataTable.document_type,
             "language": FileMetadataTable.language,
             "operation_number": FileMetadataTable.operation_number,

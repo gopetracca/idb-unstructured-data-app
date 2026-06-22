@@ -30,7 +30,9 @@ class FileMetadataTable(Base):
         primary_key=True,
     )
 
-    # Document type discriminator (Single Table Inheritance)
+    # Schema discriminator — picks metadata model (operational, publication)
+    document_category: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    # User-facing document classification (e.g., PCR, Report, LP, journal_article)
     document_type: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     language: Mapped[str | None] = mapped_column(
         sa.String(10), nullable=True, server_default="en"
@@ -87,6 +89,7 @@ class FileMetadataTable(Base):
         sa.Index("ix_metadata_dept_id", "dept_id"),
         sa.Index("ix_metadata_document_author", "document_author"),
         sa.Index("ix_metadata_document_type", "document_type"),
+        sa.Index("ix_metadata_document_category", "document_category"),
         # Publication document indexes
         sa.Index("ix_metadata_doi", "doi"),
         sa.Index("ix_metadata_journal", "journal"),
@@ -100,9 +103,9 @@ class FileMetadataTable(Base):
         """Convert ORM model to the appropriate DocumentMetadata subclass.
 
         Uses get_metadata_model() to select the correct Pydantic model
-        based on document_type, so operational fields are preserved.
+        based on document_category, so operational/publication fields are preserved.
         """
-        model_cls = get_metadata_model(self.document_type)
+        model_cls = get_metadata_model(self.document_category)
         return model_cls.model_validate(self, from_attributes=True)
 
     @classmethod
