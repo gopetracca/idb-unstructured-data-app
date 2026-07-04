@@ -6,7 +6,7 @@ removed, or its scope drifts — update the mapping deliberately when the API
 surface changes.
 
 Verb rule: GET → documents.read, POST/PATCH → documents.write, DELETE → admin;
-plus search.query for /search/* and admin for /collections/* and /analytics/*.
+plus Search for /search/* and admin for /collections/* and /analytics/*.
 """
 
 import pytest
@@ -21,9 +21,9 @@ _PUBLIC: set[tuple[str, str]] = {("GET", "/")}
 
 _EXPECTED_SCOPES: dict[tuple[str, str], str] = {
     # --- search (read-side RAG consumption) ---
-    ("POST", "/api/v1/search"): Scopes.SEARCH_QUERY,
-    ("POST", "/api/v1/search/operational"): Scopes.SEARCH_QUERY,
-    ("POST", "/api/v1/search/publications"): Scopes.SEARCH_QUERY,
+    ("POST", "/api/v1/search"): Scopes.SEARCH,
+    ("POST", "/api/v1/search/operational"): Scopes.SEARCH,
+    ("POST", "/api/v1/search/publications"): Scopes.SEARCH,
     # --- discovery / reads ---
     ("GET", "/api/v1/capabilities"): Scopes.DOCUMENTS_READ,
     ("GET", "/api/v1/documents"): Scopes.DOCUMENTS_READ,
