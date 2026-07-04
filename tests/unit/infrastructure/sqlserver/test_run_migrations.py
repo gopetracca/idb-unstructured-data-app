@@ -1,4 +1,4 @@
-"""Unit tests for the startup migration runner (AIA-394)."""
+"""Unit tests for the database migration runner (AIA-394)."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

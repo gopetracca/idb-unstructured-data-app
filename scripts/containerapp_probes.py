@@ -57,13 +57,6 @@ def main() -> int:
     parser.add_argument("--image", help="Full image reference to deploy (registry/repo:tag)")
     parser.add_argument("--dd-version", help="Value for the DD_VERSION env var")
     parser.add_argument("--revision-suffix", help="Revision suffix for the new revision")
-    parser.add_argument(
-        "--set-env",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="Additional env var to set on the container (repeatable)",
-    )
     args = parser.parse_args()
 
     app = json.load(sys.stdin)
@@ -88,16 +81,9 @@ def main() -> int:
 
     if args.image:
         container["image"] = args.image
-    extra_env = {"DD_VERSION": args.dd_version} if args.dd_version is not None else {}
-    for pair in args.set_env:
-        name, _, value = pair.partition("=")
-        if not name or not _:
-            print(f"error: --set-env expects NAME=VALUE, got {pair!r}", file=sys.stderr)
-            return 1
-        extra_env[name] = value
-    if extra_env:
-        env = [e for e in (container.get("env") or []) if e.get("name") not in extra_env]
-        env.extend({"name": name, "value": value} for name, value in extra_env.items())
+    if args.dd_version is not None:
+        env = [e for e in (container.get("env") or []) if e.get("name") != "DD_VERSION"]
+        env.append({"name": "DD_VERSION", "value": args.dd_version})
         container["env"] = env
     if args.revision_suffix:
         template["revisionSuffix"] = args.revision_suffix

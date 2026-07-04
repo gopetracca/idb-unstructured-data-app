@@ -1,14 +1,15 @@
-"""Startup database migration runner (AIA-394).
+"""Database migration runner (AIA-394).
 
 Runs ``alembic upgrade head`` against ``SQL_SERVER_DATABASE_URL_MIGRATIONS``
 (falling back to ``SQL_SERVER_DATABASE_URL``) while holding a SQL Server
-application lock, so concurrent replicas starting the same revision cannot run
-migrations at the same time.
+application lock, so overlapping executions (e.g. a pipeline run racing a
+manual run) serialize instead of migrating concurrently.
 
-This module lives under ``src/`` (not ``scripts/``) because ``scripts/`` is
-excluded from the container image by ``.dockerignore``; the container startup
-script triggers it when ``RUN_DB_MIGRATIONS_ON_STARTUP=true`` (set by the CD
-pipeline via the deploy script's ``--run-migrations`` flag).
+This is the entrypoint of the pre-deploy migrations Container Apps Job: the CD
+pipeline runs it once per deploy (scripts/run_migrations_job.sh) with the same
+image about to be deployed, and only rolls out the new app revision after it
+succeeds. It lives under ``src/`` (not ``scripts/``) because ``scripts/`` is
+excluded from the container image by ``.dockerignore``.
 
 Usage (inside the container / locally):
     python -m src.infrastructure.sqlserver.run_migrations

@@ -24,8 +24,6 @@ Options:
   --configure-probes           Also set liveness/readiness/startup probes
                                (/health/live, /health/ready) on the revision.
                                Requires python3 on PATH.
-  --run-migrations             Set RUN_DB_MIGRATIONS_ON_STARTUP=true so the new
-                               revision applies alembic migrations at startup.
   -h, --help                   Show this help.
 
 Examples:
@@ -99,7 +97,6 @@ TIMEOUT_SECONDS=600
 POLL_INTERVAL_SECONDS=10
 ALLOW_LATEST=false
 CONFIGURE_PROBES=false
-RUN_MIGRATIONS=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -149,10 +146,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --configure-probes)
       CONFIGURE_PROBES=true
-      shift
-      ;;
-    --run-migrations)
-      RUN_MIGRATIONS=true
       shift
       ;;
     -h|--help)
@@ -222,28 +215,21 @@ echo "Previous revision : ${OLD_REVISION:-<none>}"
 echo "Traffic mode      : ${ACTIVE_REVISIONS_MODE:-<unknown>}"
 echo ""
 
-ENV_VARS=("DD_VERSION=$IMAGE_TAG")
-if [[ "$RUN_MIGRATIONS" == true ]]; then
-  ENV_VARS+=("RUN_DB_MIGRATIONS_ON_STARTUP=true")
-fi
-
 if [[ "$CONFIGURE_PROBES" == true ]]; then
-  # Image + env vars + probes in a single template update (one revision).
+  # Image + DD_VERSION + probes in a single template update (one revision).
   command -v python3 >/dev/null 2>&1 || die "python3 is required for --configure-probes"
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PAYLOAD_FILE="$(mktemp)"
   trap 'rm -f "$PAYLOAD_FILE"' EXIT
 
-  PROBE_ARGS=(--image "$FULL_IMAGE" --dd-version "$IMAGE_TAG" --revision-suffix "$REVISION_SUFFIX")
-  if [[ "$RUN_MIGRATIONS" == true ]]; then
-    PROBE_ARGS+=(--set-env "RUN_DB_MIGRATIONS_ON_STARTUP=true")
-  fi
-
   az containerapp show \
     --name "$CONTAINER_APP_NAME" \
     --resource-group "$RESOURCE_GROUP" \
     -o json \
-    | python3 "$SCRIPT_DIR/containerapp_probes.py" "${PROBE_ARGS[@]}" \
+    | python3 "$SCRIPT_DIR/containerapp_probes.py" \
+        --image "$FULL_IMAGE" \
+        --dd-version "$IMAGE_TAG" \
+        --revision-suffix "$REVISION_SUFFIX" \
     > "$PAYLOAD_FILE"
 
   az containerapp update \
@@ -257,7 +243,7 @@ else
     --resource-group "$RESOURCE_GROUP" \
     --image "$FULL_IMAGE" \
     --revision-suffix "$REVISION_SUFFIX" \
-    --set-env-vars "${ENV_VARS[@]}" \
+    --set-env-vars "DD_VERSION=$IMAGE_TAG" \
     --output none
 fi
 

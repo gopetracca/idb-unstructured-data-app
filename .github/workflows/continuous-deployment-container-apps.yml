@@ -48,6 +48,29 @@ jobs:
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
           tenant-id: ${{ vars.TENANT_ID }}
 
+      # Apply alembic migrations via a one-shot Container Apps Job (same image,
+      # runs inside the environment network with its own DB credentials) and
+      # only continue to the revision deploy when it succeeds. Skipped until
+      # the MIGRATIONS_JOB_NAME environment variable is configured — see
+      # docs/AIA-394-database-migrations.md for the one-time provisioning.
+      - name: Run database migrations
+        if: ${{ vars.MIGRATIONS_JOB_NAME != '' }}
+        shell: bash
+        env:
+          MIGRATIONS_JOB_NAME: ${{ vars.MIGRATIONS_JOB_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
+          IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          chmod +x scripts/run_migrations_job.sh
+          scripts/run_migrations_job.sh \
+            --job "$MIGRATIONS_JOB_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --acr "$ACR_NAME" \
+            --image "$IMAGE_NAME" \
+            --tag "$IMAGE_TAG"
+
       - name: Deploy Container App revision
         shell: bash
         env:
@@ -64,5 +87,4 @@ jobs:
             --acr "$ACR_NAME" \
             --image "$IMAGE_NAME" \
             --tag "$IMAGE_TAG" \
-            --configure-probes \
-            --run-migrations
+            --configure-probes
