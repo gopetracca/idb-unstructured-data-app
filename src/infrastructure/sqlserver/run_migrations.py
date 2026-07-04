@@ -5,11 +5,11 @@ Runs ``alembic upgrade head`` against ``SQL_SERVER_DATABASE_URL_MIGRATIONS``
 application lock, so overlapping executions (e.g. a pipeline run racing a
 manual run) serialize instead of migrating concurrently.
 
-This is the entrypoint of the pre-deploy migrations Container Apps Job: the CD
-pipeline runs it once per deploy (scripts/run_migrations_job.sh) with the same
-image about to be deployed, and only rolls out the new app revision after it
-succeeds. It lives under ``src/`` (not ``scripts/``) because ``scripts/`` is
-excluded from the container image by ``.dockerignore``.
+This is the entrypoint of the pre-deploy migration step: the CD pipeline runs
+it once per deploy (scripts/run_migrations_container.sh) in a one-shot
+container using the same image about to be deployed, and only rolls out the
+new app revision after it succeeds. It lives under ``src/`` (not ``scripts/``)
+because ``scripts/`` is excluded from the container image by ``.dockerignore``.
 
 Usage (inside the container / locally):
     python -m src.infrastructure.sqlserver.run_migrations

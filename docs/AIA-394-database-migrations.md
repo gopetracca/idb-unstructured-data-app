@@ -1,112 +1,78 @@
 # AIA-394 — Database Migrations in the CD Pipeline
 
-Alembic migrations run **once per deploy** as a step of the CD pipeline, not at
-container startup. The pipeline triggers a one-shot **Azure Container Apps Job**
-that runs `alembic upgrade head` with the exact image about to be deployed, and
-the app revision is only rolled out after the job execution succeeds.
+Alembic migrations run **once per deploy, as a step of the CD pipeline** — not
+at container startup. The workflow pulls the exact image about to be deployed
+and runs its migration runner in a one-shot container on the GitHub Actions
+runner (which has network access to SQL Server). The app revision is only
+rolled out after the migration container exits successfully.
 
 ```
-CI (tests) ──► build & push image ──► migrations job (this doc) ──► deploy revision
-                                        │ Failed/timeout
-                                        └────────► pipeline stops, old revision keeps running
+CI (tests) ──► build & push image ──► Run database migrations ──► Deploy Container App revision
+                                        │ non-zero exit
+                                        └────────► pipeline stops, old revision keeps serving
 ```
 
-Why a Container Apps Job instead of running alembic on the GitHub runner:
+Design notes:
 
-- The GitHub-hosted runner has no network path to SQL Server and the pipeline
-  holds no database credentials — all data-plane config lives on Azure
-  resources. The job runs inside the same Container Apps environment (same
-  VNet/egress) with its own secrets.
-- The job reuses the application image, so the migration code, ODBC driver and
-  dependencies are exactly what is being deployed.
-
-Why not at container startup: with multiple replicas every start (including
-scale-out) would re-run the runner and couple app boot to DDL permissions.
-The runner itself (`src/infrastructure/sqlserver/run_migrations.py`) still
-takes a `sp_getapplock` application lock, so a pipeline run racing a manual
-run serializes instead of migrating concurrently.
+- **Same image as the deploy**: migration code, ODBC Driver 18 and
+  dependencies are exactly what ships — no separate environment to drift.
+  This mirrors the manual flow used until now (`docker-compose.dev.yml`,
+  service `sqlserver-migrate`).
+- **Not at container startup**: with multiple replicas every start (including
+  scale-out) would re-run the runner and couple app boot to DDL permissions.
+- **Concurrency guard**: the runner
+  (`src/infrastructure/sqlserver/run_migrations.py`) takes a `sp_getapplock`
+  application lock, so a pipeline run racing a manual run serializes instead
+  of migrating concurrently.
+- **Separate credentials**: the step uses
+  `SQL_SERVER_DATABASE_URL_MIGRATIONS` (a DDL-capable login, e.g.
+  `oper_ai_deployer`); the app runtime keeps its own least-privilege URL.
+- An alternative implementation that runs migrations as an Azure Container
+  Apps Job inside the environment network (for infra where the runner cannot
+  reach SQL Server) is preserved on branch
+  `feature/AIA-394-aca-job-migrations`.
 
 ---
 
-## 1. One-time provisioning (per environment)
+## 1. Setup (once per environment)
 
-Create the job next to the Container App (adjust names per environment):
+Add the secret `SQL_SERVER_DATABASE_URL_MIGRATIONS` to the matching GitHub
+Environment (development / staging / production): the SQLAlchemy async URL
+(`mssql+aioodbc://...`) of a login with DDL rights on the target database.
 
-```bash
-ACR=acrnpdaimvpshared
-RG=rg-np-d-aimvp
-ACA_ENV=<container-apps-environment-name>   # same environment as the app
-JOB=caj-np-d-aimvp-migrations
-IMAGE=$ACR.azurecr.io/aimvp-unstructured-data-app:<current-tag>
-
-az containerapp job create \
-  --name "$JOB" \
-  --resource-group "$RG" \
-  --environment "$ACA_ENV" \
-  --trigger-type Manual \
-  --replica-timeout 1800 \
-  --replica-retry-limit 0 \
-  --parallelism 1 \
-  --replica-completion-count 1 \
-  --cpu 0.5 --memory 1.0Gi \
-  --image "$IMAGE" \
-  --command "/opt/python/3/bin/python" \
-  --args "-m" "src.infrastructure.sqlserver.run_migrations" \
-  --registry-server "$ACR.azurecr.io" \
-  --registry-identity system \
-  --secrets "sql-migrations-url=<mssql+aioodbc:// url with DDL rights>" \
-  --env-vars \
-      "SQL_SERVER_ENABLED=true" \
-      "SQL_SERVER_DATABASE_URL_MIGRATIONS=secretref:sql-migrations-url"
-```
-
-Notes:
-
-- `--command` overrides the image entrypoint (datadog-init + Functions host is
-  not needed for a migration run); the image `WORKDIR` is `/home/site/wwwroot`,
-  where `alembic.ini` and `src/` live.
-- The migrations URL may use a login with DDL rights; the app's runtime
-  connection string then no longer needs them.
-- If the registry is attached with a user-assigned identity, replace
-  `--registry-identity system` accordingly.
-
-Then set the GitHub **environment variable** `MIGRATIONS_JOB_NAME` (e.g.
-`caj-np-d-aimvp-migrations`) on the matching GitHub Environment (development /
-staging / production). While the variable is unset the pipeline skips the
-migration step, so environments can be onboarded one at a time.
+While the secret is unset, the pipeline skips the migration step, so
+environments can be onboarded one at a time.
 
 ## 2. What the pipeline does per deploy
 
-`scripts/run_migrations_job.sh` (called by
-`.github/workflows/continuous-deployment-container-apps.yml`):
+`scripts/run_migrations_container.sh` (called by
+`.github/workflows/continuous-deployment-container-apps.yml` before the deploy
+step):
 
-1. `az containerapp job update --image <new tag>` — points the job at the
-   image being deployed.
-2. `az containerapp job start` — starts one execution.
-3. Polls `az containerapp job execution show` until `Succeeded`
-   (`Failed`/`Stopped`/timeout fails the pipeline and the deploy never runs).
+1. `az acr login` + `docker pull` of the image tag being deployed.
+2. `docker run --rm -e SQL_SERVER_ENABLED=true -e SQL_SERVER_DATABASE_URL_MIGRATIONS
+   --entrypoint /opt/python/3/bin/python <image> -m src.infrastructure.sqlserver.run_migrations`
+   — the secret is forwarded via the environment, never as an argument.
+3. A non-zero container exit fails the workflow; the deploy step never runs.
+
+Migration logs stream inline in the Actions job output.
 
 ## 3. Running manually
 
-From a workstation with `az` access (e.g. hotfix or first-time backfill):
+Same as before via docker compose (uses `.env.dev`):
 
 ```bash
-scripts/run_migrations_job.sh \
-  --job caj-np-d-aimvp-migrations \
-  --resource-group rg-np-d-aimvp \
+docker compose -f docker-compose.dev.yml up sqlserver-migrate
+```
+
+Or with the pipeline script from a workstation that has `az` + `docker`:
+
+```bash
+export SQL_SERVER_DATABASE_URL_MIGRATIONS='mssql+aioodbc://...'
+scripts/run_migrations_container.sh \
   --acr acrnpdaimvpshared \
   --image aimvp-unstructured-data-app \
   --tag <tag>
-```
-
-Logs of a given execution:
-
-```bash
-az containerapp job logs show \
-  --name caj-np-d-aimvp-migrations \
-  --resource-group rg-np-d-aimvp \
-  --execution <execution-name> \
-  --container caj-np-d-aimvp-migrations
 ```
 
 Local development keeps using alembic directly:
