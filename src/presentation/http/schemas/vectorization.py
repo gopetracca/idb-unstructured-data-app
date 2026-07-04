@@ -9,7 +9,7 @@ class VectorizeChunksRequestSchema(BaseModel):
     """Request schema for vectorizing document chunks."""
 
     file_id: str = Field(..., description="File identifier (UUID)")
-    tenant_id: str = Field(default="default", description="Tenant identifier")
+    # tenant_id is resolved server-side (issue #143); not accepted from the client.
     file_version: int = Field(default=1, ge=1, description="File version")
     embedding_model: str = Field(
         default="text-embedding-3-small",

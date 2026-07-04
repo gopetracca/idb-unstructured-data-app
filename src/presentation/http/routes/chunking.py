@@ -12,6 +12,7 @@ from src.application.use_cases.chunk_document import ChunkDocumentUseCase
 from src.application.use_cases.list_chunks import ListChunksUseCase
 from src.container import Container
 from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.tenant import TenantId
 from src.core.errors import (
     ChunkingError,
     DocumentNotFoundError,
@@ -74,6 +75,7 @@ router = APIRouter(prefix="/api/v1/chunks", tags=["chunks"])
 async def chunk_document(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     request: ChunkDocumentRequestSchema,
+    tenant_id: TenantId,
     use_case: ChunkDocumentUseCase = Depends(Provide[Container.chunk_document_use_case]),
 ) -> ChunkDocumentResponseSchema:
     """
@@ -102,7 +104,7 @@ async def chunk_document(
 
         dto_request = ChunkDocumentRequest(
             file_id=request.file_id,
-            tenant_id=request.tenant_id,
+            tenant_id=tenant_id,
             source_container=request.source_container,
             output_container=request.output_container,
             chunking_strategy=chunking_strategy,
@@ -230,9 +232,9 @@ async def chunk_document(
 @inject
 async def list_chunks(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    tenant_id: TenantId,
     content_id: str | None = Query(default=None, description="Filter by content ID (same as documentId for now)"),
     document_id: str | None = Query(default=None, description="Filter by document ID"),
-    tenant_id: str = Query(default="default", description="Tenant identifier"),
     page_number: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     use_case: ListChunksUseCase = Depends(Provide[Container.list_chunks_use_case]),
@@ -326,7 +328,7 @@ async def list_chunks(
 async def get_chunk(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     id: str,
-    tenant_id: str = Query(default="default", description="Tenant identifier"),
+    tenant_id: TenantId,
 ):
     """
     Get a chunk by ID.
@@ -348,7 +350,7 @@ async def get_chunk(
 async def delete_chunk(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     id: str,
-    tenant_id: str = Query(default="default", description="Tenant identifier"),
+    tenant_id: TenantId,
 ):
     """
     Delete a chunk and cascade to embeddings.

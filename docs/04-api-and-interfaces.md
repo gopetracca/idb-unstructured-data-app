@@ -39,7 +39,6 @@ All API endpoints require authentication via Azure Functions authentication/auth
 
 | Header | Required | Description | Example |
 |--------|----------|-------------|---------|
-| `X-Tenant-ID` | No | Tenant identifier | `default` |
 | `Content-Type` | Yes (POST/PATCH) | Request content type | `application/json` or `multipart/form-data` |
 | `Authorization` | Yes | Bearer token | `Bearer {token}` |
 

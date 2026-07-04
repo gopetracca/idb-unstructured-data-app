@@ -10,7 +10,7 @@ import uuid
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, Header, Security, status
+from fastapi import APIRouter, Depends, Security, status
 
 from src.application.dto.search_dto import SemanticSearchInput
 from src.application.use_cases.semantic_search import SemanticSearchUseCase
@@ -25,6 +25,7 @@ from src.core.errors import (
 from src.core.value_objects.search_mode import SearchMode
 from src.presentation.http.auth import CurrentUser, get_current_user
 from src.presentation.http.routes.search_helpers import build_response, map_errors
+from src.presentation.http.tenant import TenantId
 from src.presentation.http.schemas.search_schemas import (
     SemanticSearchRequest,
     SemanticSearchResponse,
@@ -40,7 +41,7 @@ _DEFAULT_ENABLE_RERANKER = False
 
 def _build_input_dto(
     request: SemanticSearchRequest,
-    x_tenant_id: str,
+    tenant_id: str,
     correlation_id: str,
 ) -> SemanticSearchInput:
     """Map HTTP request schema to application DTO, resolving defaults."""
@@ -49,7 +50,7 @@ def _build_input_dto(
         request.enable_reranker if request.enable_reranker is not None else _DEFAULT_ENABLE_RERANKER
     )
     return SemanticSearchInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         query=request.query,
         index_name=request.index_name,
         top_k=request.top_k,
@@ -111,7 +112,7 @@ def _build_input_dto(
 async def search(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     request: SemanticSearchRequest,
-    x_tenant_id: Annotated[str, Header(description="Tenant identifier")] = "default",
+    tenant_id: TenantId,
     use_case: SemanticSearchUseCase = Depends(Provide[Container.semantic_search_use_case]),
 ) -> SemanticSearchResponse:
     correlation_id = str(uuid.uuid4())
@@ -123,7 +124,7 @@ async def search(
         correlation_id,
     )
     try:
-        input_dto = _build_input_dto(request, x_tenant_id, correlation_id)
+        input_dto = _build_input_dto(request, tenant_id, correlation_id)
         output = await use_case.execute(input_dto)
         logger.info(
             "Search completed: results=%d, time=%dms, correlation_id=%s",

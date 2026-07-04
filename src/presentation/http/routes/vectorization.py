@@ -11,6 +11,7 @@ from src.application.dto.embedding import VectorizeChunksRequest
 from src.application.use_cases.vectorize_chunks import VectorizeChunksUseCase
 from src.container import Container
 from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.tenant import TenantId
 from src.core.errors import (
     ChunksNotFoundError,
     DocumentNotFoundError,
@@ -68,6 +69,7 @@ router = APIRouter(prefix="/api/v1/embeddings", tags=["embeddings"])
 async def vectorize_chunks(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     request: VectorizeChunksRequestSchema,
+    tenant_id: TenantId,
     use_case: VectorizeChunksUseCase = Depends(Provide[Container.vectorize_chunks_use_case]),
 ) -> VectorizeChunksResponseSchema:
     """
@@ -94,7 +96,7 @@ async def vectorize_chunks(
         # Convert HTTP schema to application DTO
         dto_request = VectorizeChunksRequest(
             file_id=request.file_id,
-            tenant_id=request.tenant_id,
+            tenant_id=tenant_id,
             file_version=request.file_version,
             embedding_model=request.embedding_model,
             batch_size=request.batch_size,
@@ -208,12 +210,12 @@ async def vectorize_chunks(
 )
 async def list_embeddings(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    tenant_id: TenantId,
     content_id: str | None = Query(default=None, description="Filter by content ID"),
     chunk_id: str | None = Query(default=None, description="Filter by chunk ID"),
     document_id: str | None = Query(default=None, description="Filter by document ID"),
     page_number: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
-    tenant_id: str = Query(default="default", description="Tenant identifier"),
 ):
     """
     List embeddings filtered by content, chunk, or document ID.
@@ -235,7 +237,7 @@ async def list_embeddings(
 async def get_embedding(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     id: str,
-    tenant_id: str = Query(default="default", description="Tenant identifier"),
+    tenant_id: TenantId,
 ):
     """
     Get an embedding by ID.
@@ -257,7 +259,7 @@ async def get_embedding(
 async def delete_embedding(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     id: str,
-    tenant_id: str = Query(default="default", description="Tenant identifier"),
+    tenant_id: TenantId,
 ):
     """
     Delete an embedding.

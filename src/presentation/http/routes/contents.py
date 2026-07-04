@@ -5,7 +5,7 @@ import uuid
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 
 from src.application.dto.document_analysis import DocumentAnalysisRequest
 from src.application.use_cases.process_document import ProcessDocumentUseCase
@@ -21,6 +21,7 @@ from src.presentation.http.schemas.document_analysis import (
     DocumentAnalysisResponseSchema,
     ErrorResponseSchema,
 )
+from src.presentation.http.tenant import TenantId
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ router = APIRouter(prefix="/api/v1/contents", tags=["contents"])
 async def create_content(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     request: DocumentAnalysisRequestSchema,
+    tenant_id: TenantId,
     use_case: ProcessDocumentUseCase = Depends(
         Provide[Container.process_document_use_case]
     ),
@@ -95,7 +97,7 @@ async def create_content(
         # Convert HTTP schema to application DTO
         dto_request = DocumentAnalysisRequest(
             file_id=request.file_id,
-            tenant_id=request.tenant_id,
+            tenant_id=tenant_id,
             source_container=request.source_container,
             output_container=request.output_container,
             correlation_id=correlation_id,
@@ -188,6 +190,7 @@ async def create_content(
 )
 async def list_contents(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    tenant_id: TenantId,
     document_id: Annotated[
         str | None,
         Query(description="Filter by document ID"),
@@ -200,10 +203,6 @@ async def list_contents(
         int,
         Query(ge=1, le=100, description="Items per page"),
     ] = 20,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
 ):
     """
     List extracted contents.
@@ -225,10 +224,7 @@ async def list_contents(
 async def get_content(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
 ):
     """
     Get content metadata by ID.
@@ -250,10 +246,7 @@ async def get_content(
 async def get_content_text(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
 ):
     """
     Get extracted text content.
@@ -275,10 +268,7 @@ async def get_content_text(
 async def delete_content(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
 ):
     """
     Delete content and cascade to chunks/embeddings.

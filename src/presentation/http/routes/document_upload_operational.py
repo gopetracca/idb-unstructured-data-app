@@ -7,7 +7,7 @@ with strongly-typed form fields for operational metadata.
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, File, Header, Security, UploadFile
+from fastapi import APIRouter, Depends, File, Security, UploadFile
 
 from src.application.dto.document_dto import UploadDocumentInput
 from src.application.use_cases.upload_and_enqueue_document import (
@@ -23,6 +23,7 @@ from src.presentation.http.schemas.document_schemas import (
 from src.presentation.http.schemas.document_upload_schemas import (
     OperationalDocumentUploadForm,
 )
+from src.presentation.http.tenant import TenantId
 
 router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 
@@ -38,16 +39,13 @@ router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 async def upload_operational_document(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     file: Annotated[UploadFile, File(description="PDF or Word document to upload")],
+    tenant_id: TenantId,
     form_data: OperationalDocumentUploadForm = Depends(
         OperationalDocumentUploadForm.as_form
     ),
     chunking_strategy: UploadChunkingStrategyForm = Depends(
         UploadChunkingStrategyForm.as_form
     ),
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
     use_case: UploadAndEnqueueDocumentUseCase = Depends(
         Provide[Container.upload_and_enqueue_document_use_case]
     ),
@@ -76,7 +74,7 @@ async def upload_operational_document(
 
     # Build input DTO
     input_dto = UploadDocumentInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         filename=file.filename or "unknown",
         content=content,
         content_type=file.content_type or "application/octet-stream",

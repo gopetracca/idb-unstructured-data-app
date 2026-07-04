@@ -9,7 +9,7 @@ class DocumentAnalysisRequestSchema(BaseModel):
     """Request schema for document analysis endpoint."""
 
     file_id: str = Field(..., description="Unique file identifier (UUID)")
-    tenant_id: str = Field(default="default", description="Tenant identifier")
+    # tenant_id is resolved server-side (issue #143); not accepted from the client.
     source_container: str = Field(
         default="raw",
         description="Source blob container name",
@@ -24,7 +24,6 @@ class DocumentAnalysisRequestSchema(BaseModel):
             "examples": [
                 {
                     "file_id": "550e8400-e29b-41d4-a716-446655440000",
-                    "tenant_id": "default",
                     "source_container": "raw",
                     "output_container": "text",
                 }

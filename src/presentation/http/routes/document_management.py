@@ -4,7 +4,7 @@ import json
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Security, UploadFile
 from pydantic import ValidationError
 
 from src.application.dto.document_dto import (
@@ -33,6 +33,7 @@ from src.presentation.http.schemas.document_schemas import (
     UpdateMetadataResponse,
     UploadDocumentResponse,
 )
+from src.presentation.http.tenant import TenantId
 
 router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 
@@ -71,6 +72,7 @@ async def upload_document(
             examples=["EZSHARE-510177122-450"],
         ),
     ],
+    tenant_id: TenantId,
     document_type: Annotated[
         str,
         Form(
@@ -87,10 +89,6 @@ async def upload_document(
     chunking_strategy: UploadChunkingStrategyForm = Depends(
         UploadChunkingStrategyForm.as_form
     ),
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
     use_case: UploadAndEnqueueDocumentUseCase = Depends(
         Provide[Container.upload_and_enqueue_document_use_case]
     ),
@@ -153,7 +151,7 @@ async def upload_document(
 
     # Build input DTO
     input_dto = UploadDocumentInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         filename=file.filename or "unknown",
         content=content,
         content_type=file.content_type or "application/octet-stream",
@@ -188,10 +186,7 @@ async def update_document_metadata(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     id: str,
     request: UpdateMetadataRequest,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: UpdateMetadataUseCase = Depends(Provide[Container.update_metadata_use_case]),
 ) -> UpdateMetadataResponse:
     """
@@ -202,7 +197,7 @@ async def update_document_metadata(
     """
     # Build input DTO
     input_dto = UpdateMetadataInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         file_id=id,
         metadata_updates=request.to_update_dict(),
     )
@@ -229,10 +224,7 @@ async def update_document_metadata(
 async def delete_document(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: DeleteDocumentUseCase = Depends(Provide[Container.delete_document_use_case]),
 ) -> DeleteDocumentResponse:
     """
@@ -243,7 +235,7 @@ async def delete_document(
     """
     # Build input DTO
     input_dto = DeleteDocumentInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         file_id=id,
     )
 
@@ -269,10 +261,7 @@ async def delete_document(
 async def get_document(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     document_store=Depends(Provide[Container.document_repository]),
 ) -> DocumentSchema:
     """
@@ -280,7 +269,7 @@ async def get_document(
 
     Returns the document metadata including upload/update timestamps and custom metadata.
     """
-    doc = await document_store.get_by_id(tenant_id=x_tenant_id, file_id=id)
+    doc = await document_store.get_by_id(tenant_id=tenant_id, file_id=id)
 
     if doc is None:
         from fastapi import HTTPException, status
@@ -316,10 +305,7 @@ async def get_document(
 @inject
 async def list_documents(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     limit: Annotated[
         int,
         Query(ge=1, le=100, description="Number of items per page"),
@@ -428,7 +414,7 @@ async def list_documents(
 
     # Build input DTO
     input_dto = ListDocumentsInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         limit=limit,
         cursor=cursor,
         # JSON metadata filters

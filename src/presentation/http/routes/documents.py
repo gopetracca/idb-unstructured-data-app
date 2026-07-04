@@ -27,6 +27,7 @@ from src.presentation.http.schemas.document_analysis import (
     DocumentAnalysisResponseSchema,
     ErrorResponseSchema,
 )
+from src.presentation.http.tenant import TenantId
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 async def analyze_document(
     user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     request: DocumentAnalysisRequestSchema,
+    tenant_id: TenantId,
     use_case: ProcessDocumentUseCase = Depends(Provide[Container.process_document_use_case]),
 ) -> DocumentAnalysisResponseSchema:
     """
@@ -100,7 +102,7 @@ async def analyze_document(
         # Convert HTTP schema to application DTO
         dto_request = DocumentAnalysisRequest(
             file_id=request.file_id,
-            tenant_id=request.tenant_id,
+            tenant_id=tenant_id,
             source_container=request.source_container,
             output_container=request.output_container,
             correlation_id=correlation_id,
