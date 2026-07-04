@@ -7,22 +7,25 @@ with strongly-typed form fields for publication metadata.
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, File, Header, Security, UploadFile
+from fastapi import APIRouter, Depends, File, Security, UploadFile
 
 from src.application.dto.document_dto import UploadDocumentInput
+from src.config.settings import get_settings
 from src.application.use_cases.upload_and_enqueue_document import (
     UploadAndEnqueueDocumentUseCase,
 )
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.schemas.chunking import UploadChunkingStrategyForm
 from src.presentation.http.schemas.document_schemas import (
     MetadataSchema,
     UploadDocumentResponse,
 )
+from src.presentation.http.routes.upload_helpers import read_upload_bounded
 from src.presentation.http.schemas.document_upload_schemas import (
     PublicationDocumentUploadForm,
 )
+from src.presentation.http.tenant import TenantId
 
 router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 
@@ -36,18 +39,15 @@ router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 )
 @inject
 async def upload_publication_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     file: Annotated[UploadFile, File(description="PDF or Word document to upload")],
+    tenant_id: TenantId,
     form_data: PublicationDocumentUploadForm = Depends(
         PublicationDocumentUploadForm.as_form
     ),
     chunking_strategy: UploadChunkingStrategyForm = Depends(
         UploadChunkingStrategyForm.as_form
     ),
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
     use_case: UploadAndEnqueueDocumentUseCase = Depends(
         Provide[Container.upload_and_enqueue_document_use_case]
     ),
@@ -55,7 +55,8 @@ async def upload_publication_document(
     """
     Upload a research publication to the RAG system.
 
-    Accepts PDF and Word (.docx) files up to 50MB with typed publication metadata.
+    Accepts PDF and Word (.docx) files up to the configured size limit
+    (FILE_UPLOAD_MAX_FILE_SIZE_MB, default 50 MB) with typed publication metadata.
     Requires a unique ezshare_id for duplicate detection.
 
     Publication-specific fields:
@@ -68,8 +69,10 @@ async def upload_publication_document(
 
     Returns the generated file ID and upload confirmation.
     """
-    # Read file content
-    content = await file.read()
+    # Read file content in bounded chunks (413 past the configured limit)
+    content = await read_upload_bounded(
+        file, get_settings().file_upload.max_file_size_bytes
+    )
 
     # Build metadata from typed form fields
     metadata_dict = form_data.to_metadata_dict()
@@ -78,7 +81,7 @@ async def upload_publication_document(
 
     # Build input DTO
     input_dto = UploadDocumentInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         filename=file.filename or "unknown",
         content=content,
         content_type=file.content_type or "application/octet-stream",

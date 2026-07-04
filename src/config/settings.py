@@ -612,6 +612,16 @@ class Settings(BaseSettings):
         "Set PUBLICATIONS_SEARCH_ENABLED=true to activate.",
     )
 
+    # Tenant resolution (AIA-476): the API no longer accepts a client-supplied
+    # tenant. This single value is the effective tenant for all requests; the
+    # multi-tenant plumbing in use-cases/repositories is preserved. To re-enable
+    # per-user multi-tenancy, change the resolver in src/presentation/http/tenant.py
+    # to read CurrentUser.tenant_id instead.
+    default_tenant_id: str = Field(
+        default="default",
+        description="Effective tenant id applied to all requests (DEFAULT_TENANT_ID)",
+    )
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""

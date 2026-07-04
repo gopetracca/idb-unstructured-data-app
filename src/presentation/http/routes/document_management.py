@@ -4,7 +4,7 @@ import json
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Security, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Security, UploadFile
 from pydantic import ValidationError
 
 from src.application.dto.document_dto import (
@@ -20,8 +20,10 @@ from src.application.use_cases.upload_and_enqueue_document import (
     UploadAndEnqueueDocumentUseCase,
 )
 from src.container import Container
+from src.config.settings import get_settings
 from src.core.value_objects.document_metadata import METADATA_MODELS, get_metadata_model
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
+from src.presentation.http.routes.upload_helpers import read_upload_bounded
 from src.presentation.http.schemas.chunking import UploadChunkingStrategyForm
 from src.presentation.http.schemas.document_schemas import (
     DeleteDocumentResponse,
@@ -33,6 +35,7 @@ from src.presentation.http.schemas.document_schemas import (
     UpdateMetadataResponse,
     UploadDocumentResponse,
 )
+from src.presentation.http.tenant import TenantId
 
 router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 
@@ -58,7 +61,7 @@ For a better developer experience with individual form fields, use the type-spec
 )
 @inject
 async def upload_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     file: Annotated[UploadFile, File(description="PDF or Word document to upload")],
     collection_name: Annotated[
         str,
@@ -71,6 +74,7 @@ async def upload_document(
             examples=["EZSHARE-510177122-450"],
         ),
     ],
+    tenant_id: TenantId,
     document_type: Annotated[
         str,
         Form(
@@ -87,10 +91,6 @@ async def upload_document(
     chunking_strategy: UploadChunkingStrategyForm = Depends(
         UploadChunkingStrategyForm.as_form
     ),
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
     use_case: UploadAndEnqueueDocumentUseCase = Depends(
         Provide[Container.upload_and_enqueue_document_use_case]
     ),
@@ -98,7 +98,8 @@ async def upload_document(
     """
     Upload a document to the RAG system.
 
-    Accepts PDF and Word (.docx) files up to 50MB with optional metadata.
+    Accepts PDF and Word (.docx) files up to the configured size limit
+    (FILE_UPLOAD_MAX_FILE_SIZE_MB, default 50 MB) with optional metadata.
     Requires a unique ezshare_id for duplicate detection.
     Specify chunking via `chunking_strategy_name` + `chunking_parameters` JSON
     (defaults to fixed_size with chunk_size/chunk_overlap defaults).
@@ -148,12 +149,14 @@ async def upload_document(
 
     chunking_strategy_model = chunking_strategy.to_chunking_strategy()
 
-    # Read file content
-    content = await file.read()
+    # Read file content in bounded chunks (413 past the configured limit)
+    content = await read_upload_bounded(
+        file, get_settings().file_upload.max_file_size_bytes
+    )
 
     # Build input DTO
     input_dto = UploadDocumentInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         filename=file.filename or "unknown",
         content=content,
         content_type=file.content_type or "application/octet-stream",
@@ -185,13 +188,10 @@ async def upload_document(
 )
 @inject
 async def update_document_metadata(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     id: str,
     request: UpdateMetadataRequest,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: UpdateMetadataUseCase = Depends(Provide[Container.update_metadata_use_case]),
 ) -> UpdateMetadataResponse:
     """
@@ -202,7 +202,7 @@ async def update_document_metadata(
     """
     # Build input DTO
     input_dto = UpdateMetadataInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         file_id=id,
         metadata_updates=request.to_update_dict(),
     )
@@ -227,12 +227,9 @@ async def update_document_metadata(
 )
 @inject
 async def delete_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: DeleteDocumentUseCase = Depends(Provide[Container.delete_document_use_case]),
 ) -> DeleteDocumentResponse:
     """
@@ -243,7 +240,7 @@ async def delete_document(
     """
     # Build input DTO
     input_dto = DeleteDocumentInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         file_id=id,
     )
 
@@ -267,12 +264,9 @@ async def delete_document(
 )
 @inject
 async def get_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     document_store=Depends(Provide[Container.document_repository]),
 ) -> DocumentSchema:
     """
@@ -280,7 +274,7 @@ async def get_document(
 
     Returns the document metadata including upload/update timestamps and custom metadata.
     """
-    doc = await document_store.get_by_id(tenant_id=x_tenant_id, file_id=id)
+    doc = await document_store.get_by_id(tenant_id=tenant_id, file_id=id)
 
     if doc is None:
         from fastapi import HTTPException, status
@@ -315,11 +309,8 @@ async def get_document(
 )
 @inject
 async def list_documents(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
+    tenant_id: TenantId,
     limit: Annotated[
         int,
         Query(ge=1, le=100, description="Number of items per page"),
@@ -428,7 +419,7 @@ async def list_documents(
 
     # Build input DTO
     input_dto = ListDocumentsInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         limit=limit,
         cursor=cursor,
         # JSON metadata filters

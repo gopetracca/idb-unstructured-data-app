@@ -3,10 +3,11 @@
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
+from src.presentation.http.tenant import TenantId
 from src.presentation.http.schemas.analytics import (
     ProcessingTimelineResponse,
     StageDurationStatisticsResponse,
@@ -25,12 +26,9 @@ router = APIRouter(prefix="/api/v1", tags=["analytics"])
 )
 @inject
 async def get_processing_timeline(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     file_id: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     processing_events_repository=Depends(Provide[Container.processing_events_repository]),
 ) -> ProcessingTimelineResponse:
     """Get the processing timeline for a specific document."""
@@ -44,7 +42,7 @@ async def get_processing_timeline(
         )
 
     events = await processing_events_repository.get_file_timeline(
-        file_id, tenant_id=x_tenant_id
+        file_id, tenant_id=tenant_id
     )
 
     # Calculate total duration from first to last event
@@ -79,11 +77,8 @@ async def get_processing_timeline(
 )
 @inject
 async def get_stage_duration_statistics(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
+    tenant_id: TenantId,
     stage: Annotated[
         str | None,
         Query(description="Optional stage filter"),
@@ -101,12 +96,12 @@ async def get_stage_duration_statistics(
         )
 
     stats = await processing_events_repository.get_stage_statistics(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         stage=stage,
     )
 
     return StageDurationStatisticsResponse(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         stages=[
             StageDurationStatSchema(
                 stage=s.stage,

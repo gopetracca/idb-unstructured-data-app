@@ -9,6 +9,7 @@ from src.config.settings import EntraIDSettings
 from src.presentation.http.auth.dependencies import get_current_user
 from src.presentation.http.auth.errors import AuthenticationError, AuthorizationError
 from src.presentation.http.auth.models import CurrentUser
+from src.presentation.http.auth.scopes import Scopes
 from src.presentation.http.auth.token_validator import TokenValidator
 
 _VALID_CLAIMS = {
@@ -53,8 +54,7 @@ async def test_returns_anonymous_user_when_auth_disabled() -> None:
         )
 
     assert user.user_id == "anonymous"
-    assert "api.read" in user.roles
-    assert "api.write" in user.roles
+    assert user.roles == [scope.value for scope in Scopes]
 
 
 # ---------------------------------------------------------------------------

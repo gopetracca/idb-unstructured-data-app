@@ -21,6 +21,9 @@ Options:
   --poll-interval <seconds>    Revision polling interval. Default: 10.
   --revision-suffix <suffix>   Override the generated revision suffix.
   --allow-latest               Allow deploying the latest tag. Disabled by default.
+  --configure-probes           Also set liveness/readiness/startup probes
+                               (/health/live, /health/ready) on the revision.
+                               Requires python3 on PATH.
   -h, --help                   Show this help.
 
 Examples:
@@ -93,6 +96,7 @@ REVISION_SUFFIX=""
 TIMEOUT_SECONDS=600
 POLL_INTERVAL_SECONDS=10
 ALLOW_LATEST=false
+CONFIGURE_PROBES=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -138,6 +142,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-latest)
       ALLOW_LATEST=true
+      shift
+      ;;
+    --configure-probes)
+      CONFIGURE_PROBES=true
       shift
       ;;
     -h|--help)
@@ -207,13 +215,37 @@ echo "Previous revision : ${OLD_REVISION:-<none>}"
 echo "Traffic mode      : ${ACTIVE_REVISIONS_MODE:-<unknown>}"
 echo ""
 
-az containerapp update \
-  --name "$CONTAINER_APP_NAME" \
-  --resource-group "$RESOURCE_GROUP" \
-  --image "$FULL_IMAGE" \
-  --revision-suffix "$REVISION_SUFFIX" \
-  --set-env-vars "DD_VERSION=$IMAGE_TAG" \
-  --output none
+if [[ "$CONFIGURE_PROBES" == true ]]; then
+  # Image + DD_VERSION + probes in a single template update (one revision).
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for --configure-probes"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  PAYLOAD_FILE="$(mktemp)"
+  trap 'rm -f "$PAYLOAD_FILE"' EXIT
+
+  az containerapp show \
+    --name "$CONTAINER_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    -o json \
+    | python3 "$SCRIPT_DIR/containerapp_probes.py" \
+        --image "$FULL_IMAGE" \
+        --dd-version "$IMAGE_TAG" \
+        --revision-suffix "$REVISION_SUFFIX" \
+    > "$PAYLOAD_FILE"
+
+  az containerapp update \
+    --name "$CONTAINER_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --yaml "$PAYLOAD_FILE" \
+    --output none
+else
+  az containerapp update \
+    --name "$CONTAINER_APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --image "$FULL_IMAGE" \
+    --revision-suffix "$REVISION_SUFFIX" \
+    --set-env-vars "DD_VERSION=$IMAGE_TAG" \
+    --output none
+fi
 
 LATEST_REVISION="$(az containerapp show \
   --name "$CONTAINER_APP_NAME" \

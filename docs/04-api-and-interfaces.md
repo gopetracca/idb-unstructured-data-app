@@ -33,13 +33,44 @@ http://localhost:7071
 
 ### Authentication
 
-All API endpoints require authentication via Azure Functions authentication/authorization. Include appropriate bearer tokens in requests.
+All `/api/v1/*` endpoints require a Microsoft Entra ID bearer token **and** a
+specific App Role (scope) in the token's `roles` claim. The API uses a
+resource-oriented 4-scope model:
+
+| Scope | Grants |
+|-------|--------|
+| `search.query` | `POST /api/v1/search`, `/search/operational`, `/search/publications` |
+| `documents.read` | All GET reads (documents, contents, chunks, embeddings) and `/capabilities` |
+| `documents.write` | Uploads, metadata PATCH, pipeline triggers (contents/chunks/embeddings POST) |
+| `admin` | All DELETEs, the entire `/collections/*` surface, and `/analytics/*` |
+
+Verb rule of thumb: GET → `documents.read`, POST/PATCH → `documents.write`,
+DELETE → `admin`; plus `search.query` for `/search/*` and `admin` for
+`/collections/*` and `/analytics/*`.
+
+There is **no scope implication**: `admin` does not include `documents.read`.
+Principals needing multiple scopes are assigned multiple App Roles in Entra
+(e.g. an operator gets `admin` + `documents.write` + `documents.read` +
+`search.query`). Responses: `401` for a missing/invalid token, `403` for a
+valid token lacking the required scope. When `ENTRA_ID_ENABLED=false` (dev/CI)
+all requests are accepted anonymously with every scope.
+
+### Health Probes
+
+Unauthenticated endpoints used by Azure Container Apps probes (configured by
+`scripts/deploy_container_app.{sh,ps1} --configure-probes`):
+
+| Endpoint | Purpose | Response |
+|----------|---------|----------|
+| `GET /health/live` | Liveness — process is up, no dependency I/O | `200 {"status": "alive", ...}` |
+| `GET /health/ready` | Readiness/startup — SQL Server + Azure AI Search checked concurrently (4s timeout each) | `200` when all pass; `503` with a per-dependency `checks` map otherwise |
+
+`GET /` remains as a legacy liveness alias.
 
 ### Common Headers
 
 | Header | Required | Description | Example |
 |--------|----------|-------------|---------|
-| `X-Tenant-ID` | No | Tenant identifier | `default` |
 | `Content-Type` | Yes (POST/PATCH) | Request content type | `application/json` or `multipart/form-data` |
 | `Authorization` | Yes | Bearer token | `Bearer {token}` |
 
