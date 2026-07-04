@@ -30,6 +30,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      # The secrets context is not allowed in step `if:` expressions, so the
+      # migration gate below checks this env mapping instead.
+      SQL_SERVER_DATABASE_URL_MIGRATIONS: ${{ secrets.SQL_SERVER_DATABASE_URL_MIGRATIONS }}
 
     steps:
       - uses: actions/checkout@v4
@@ -55,10 +59,9 @@ jobs:
       # SQL_SERVER_DATABASE_URL_MIGRATIONS secret is configured on the GitHub
       # Environment — see docs/AIA-394-database-migrations.md.
       - name: Run database migrations
-        if: ${{ secrets.SQL_SERVER_DATABASE_URL_MIGRATIONS != '' }}
+        if: ${{ env.SQL_SERVER_DATABASE_URL_MIGRATIONS != '' }}
         shell: bash
         env:
-          SQL_SERVER_DATABASE_URL_MIGRATIONS: ${{ secrets.SQL_SERVER_DATABASE_URL_MIGRATIONS }}
           ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
           IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
           IMAGE_TAG: ${{ inputs.image-tag }}
