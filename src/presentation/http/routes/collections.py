@@ -20,7 +20,7 @@ from src.application.dto.ingestion_dto import (
 from src.application.use_cases.ingest_documents import IngestDocumentsUseCase
 from src.application.use_cases.manage_collection import ManageCollectionUseCase
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.tenant import TenantId
 from src.core.errors import (
     IndexAlreadyExistsError,
@@ -82,7 +82,7 @@ router = APIRouter(prefix="/api/v1/collections", tags=["collections"])
 )
 @inject
 async def create_collection(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     request: CreateCollectionRequest,
     tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
@@ -208,7 +208,7 @@ async def create_collection(
 )
 @inject
 async def list_collections(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
 ) -> ListCollectionsResponse:
@@ -317,7 +317,7 @@ async def list_collections(
 )
 @inject
 async def get_collection(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
     tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
@@ -439,7 +439,7 @@ async def get_collection(
 )
 @inject
 async def delete_collection(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
     tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
@@ -551,7 +551,7 @@ async def delete_collection(
 )
 @inject
 async def configure_reranker(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
     request: ConfigureRerankerRequest,
     tenant_id: TenantId,
@@ -651,7 +651,7 @@ async def configure_reranker(
 )
 @inject
 async def ingest_documents(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
     request: IngestDocumentsRequest,
     tenant_id: TenantId,

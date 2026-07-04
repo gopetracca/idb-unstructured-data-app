@@ -6,7 +6,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.tenant import TenantId
 from src.presentation.http.schemas.analytics import (
     ProcessingTimelineResponse,
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/v1", tags=["analytics"])
 )
 @inject
 async def get_processing_timeline(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     file_id: str,
     tenant_id: TenantId,
     processing_events_repository=Depends(Provide[Container.processing_events_repository]),
@@ -77,7 +77,7 @@ async def get_processing_timeline(
 )
 @inject
 async def get_stage_duration_statistics(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     tenant_id: TenantId,
     stage: Annotated[
         str | None,

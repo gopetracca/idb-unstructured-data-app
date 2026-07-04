@@ -23,7 +23,7 @@ from src.core.errors import (
     VectorDatabaseError,
 )
 from src.core.value_objects.search_mode import SearchMode
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.routes.search_helpers import build_response, map_errors
 from src.presentation.http.tenant import TenantId
 from src.presentation.http.schemas.search_schemas import (
@@ -110,7 +110,7 @@ def _build_input_dto(
 )
 @inject
 async def search(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.SEARCH_QUERY])],
     request: SemanticSearchRequest,
     tenant_id: TenantId,
     use_case: SemanticSearchUseCase = Depends(Provide[Container.semantic_search_use_case]),

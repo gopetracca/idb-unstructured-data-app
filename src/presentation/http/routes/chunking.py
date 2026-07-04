@@ -11,7 +11,7 @@ from src.application.dto.chunking import ChunkDocumentRequest, ListChunksRequest
 from src.application.use_cases.chunk_document import ChunkDocumentUseCase
 from src.application.use_cases.list_chunks import ListChunksUseCase
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.tenant import TenantId
 from src.core.errors import (
     ChunkingError,
@@ -73,7 +73,7 @@ router = APIRouter(prefix="/api/v1/chunks", tags=["chunks"])
 )
 @inject
 async def chunk_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     request: ChunkDocumentRequestSchema,
     tenant_id: TenantId,
     use_case: ChunkDocumentUseCase = Depends(Provide[Container.chunk_document_use_case]),
@@ -231,7 +231,7 @@ async def chunk_document(
 )
 @inject
 async def list_chunks(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     tenant_id: TenantId,
     content_id: str | None = Query(default=None, description="Filter by content ID (same as documentId for now)"),
     document_id: str | None = Query(default=None, description="Filter by document ID"),
@@ -326,7 +326,7 @@ async def list_chunks(
     description="Retrieve a single chunk by ID.",
 )
 async def get_chunk(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     id: str,
     tenant_id: TenantId,
 ):
@@ -348,7 +348,7 @@ async def get_chunk(
     description="Delete a chunk (cascades to embeddings).",
 )
 async def delete_chunk(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     id: str,
     tenant_id: TenantId,
 ):

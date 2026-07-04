@@ -21,7 +21,7 @@ from src.application.use_cases.upload_and_enqueue_document import (
 )
 from src.container import Container
 from src.core.value_objects.document_metadata import METADATA_MODELS, get_metadata_model
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.schemas.chunking import UploadChunkingStrategyForm
 from src.presentation.http.schemas.document_schemas import (
     DeleteDocumentResponse,
@@ -59,7 +59,7 @@ For a better developer experience with individual form fields, use the type-spec
 )
 @inject
 async def upload_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     file: Annotated[UploadFile, File(description="PDF or Word document to upload")],
     collection_name: Annotated[
         str,
@@ -183,7 +183,7 @@ async def upload_document(
 )
 @inject
 async def update_document_metadata(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     id: str,
     request: UpdateMetadataRequest,
     tenant_id: TenantId,
@@ -222,7 +222,7 @@ async def update_document_metadata(
 )
 @inject
 async def delete_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     id: str,
     tenant_id: TenantId,
     use_case: DeleteDocumentUseCase = Depends(Provide[Container.delete_document_use_case]),
@@ -259,7 +259,7 @@ async def delete_document(
 )
 @inject
 async def get_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     id: str,
     tenant_id: TenantId,
     document_store=Depends(Provide[Container.document_repository]),
@@ -304,7 +304,7 @@ async def get_document(
 )
 @inject
 async def list_documents(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     tenant_id: TenantId,
     limit: Annotated[
         int,
