@@ -9,9 +9,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.config.settings import get_settings
 from src.container import Container
 from src.infrastructure.initialization import initialize_storage
 from src.presentation.http.exception_handlers import register_exception_handlers
+from src.presentation.http.middleware.max_body_size import MaxBodySizeMiddleware
 from src.presentation.http.routes.capabilities import router as capabilities_router
 from src.presentation.http.routes.chunking import router as chunking_router
 from src.presentation.http.routes.collections import router as collections_router
@@ -77,6 +79,14 @@ app = FastAPI(
 
 # Register exception handlers
 register_exception_handlers(app)
+
+# Reject oversized request bodies before they are buffered (AIA-478).
+# Multipart overhead headroom is added inside the middleware; the streaming
+# byte counter covers chunked/understated Content-Length bodies.
+app.add_middleware(
+    MaxBodySizeMiddleware,
+    max_file_size_bytes=get_settings().file_upload.max_file_size_bytes,
+)
 
 # Include routers
 app.include_router(capabilities_router)

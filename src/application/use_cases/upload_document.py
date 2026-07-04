@@ -31,21 +31,20 @@ class UploadDocumentUseCase:
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ]
-    DEFAULT_MAX_SIZE_BYTES = 150 * 1024 * 1024
 
     def __init__(
         self,
         blob_store: BlobStorePort,
         metadata_store: DocumentStorePort,
+        max_size_bytes: int,
         container_name: str = "raw",
         allowed_types: list[str] | None = None,
-        max_size_bytes: int | None = None,
     ) -> None:
         self._blob_store = blob_store
         self._metadata_store = metadata_store
         self._container_name = container_name
         self._allowed_types = allowed_types or self.DEFAULT_ALLOWED_TYPES
-        self._max_size_bytes = max_size_bytes or self.DEFAULT_MAX_SIZE_BYTES
+        self._max_size_bytes = max_size_bytes
 
     async def execute(self, input_dto: UploadDocumentInput) -> UploadDocumentOutput:
         """

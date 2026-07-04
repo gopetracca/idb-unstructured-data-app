@@ -20,8 +20,10 @@ from src.application.use_cases.upload_and_enqueue_document import (
     UploadAndEnqueueDocumentUseCase,
 )
 from src.container import Container
+from src.config.settings import get_settings
 from src.core.value_objects.document_metadata import METADATA_MODELS, get_metadata_model
 from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
+from src.presentation.http.routes.upload_helpers import read_upload_bounded
 from src.presentation.http.schemas.chunking import UploadChunkingStrategyForm
 from src.presentation.http.schemas.document_schemas import (
     DeleteDocumentResponse,
@@ -96,7 +98,8 @@ async def upload_document(
     """
     Upload a document to the RAG system.
 
-    Accepts PDF and Word (.docx) files up to 50MB with optional metadata.
+    Accepts PDF and Word (.docx) files up to the configured size limit
+    (FILE_UPLOAD_MAX_FILE_SIZE_MB, default 50 MB) with optional metadata.
     Requires a unique ezshare_id for duplicate detection.
     Specify chunking via `chunking_strategy_name` + `chunking_parameters` JSON
     (defaults to fixed_size with chunk_size/chunk_overlap defaults).
@@ -146,8 +149,10 @@ async def upload_document(
 
     chunking_strategy_model = chunking_strategy.to_chunking_strategy()
 
-    # Read file content
-    content = await file.read()
+    # Read file content in bounded chunks (413 past the configured limit)
+    content = await read_upload_bounded(
+        file, get_settings().file_upload.max_file_size_bytes
+    )
 
     # Build input DTO
     input_dto = UploadDocumentInput(

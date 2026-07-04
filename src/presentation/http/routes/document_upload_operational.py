@@ -10,6 +10,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, File, Security, UploadFile
 
 from src.application.dto.document_dto import UploadDocumentInput
+from src.config.settings import get_settings
 from src.application.use_cases.upload_and_enqueue_document import (
     UploadAndEnqueueDocumentUseCase,
 )
@@ -20,6 +21,7 @@ from src.presentation.http.schemas.document_schemas import (
     MetadataSchema,
     UploadDocumentResponse,
 )
+from src.presentation.http.routes.upload_helpers import read_upload_bounded
 from src.presentation.http.schemas.document_upload_schemas import (
     OperationalDocumentUploadForm,
 )
@@ -53,7 +55,8 @@ async def upload_operational_document(
     """
     Upload an operational document to the RAG system.
 
-    Accepts PDF and Word (.docx) files up to 50MB with typed operational metadata.
+    Accepts PDF and Word (.docx) files up to the configured size limit
+    (FILE_UPLOAD_MAX_FILE_SIZE_MB, default 50 MB) with typed operational metadata.
     Requires a unique ezshare_id for duplicate detection.
 
     Operational-specific fields:
@@ -64,8 +67,10 @@ async def upload_operational_document(
 
     Returns the generated file ID and upload confirmation.
     """
-    # Read file content
-    content = await file.read()
+    # Read file content in bounded chunks (413 past the configured limit)
+    content = await read_upload_bounded(
+        file, get_settings().file_upload.max_file_size_bytes
+    )
 
     # Build metadata from typed form fields
     metadata_dict = form_data.to_metadata_dict()
