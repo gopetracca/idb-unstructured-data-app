@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 from src.application.dto.embedding import VectorizeChunksRequest
 from src.application.use_cases.vectorize_chunks import VectorizeChunksUseCase
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.tenant import TenantId
 from src.core.errors import (
     ChunksNotFoundError,
@@ -67,7 +67,7 @@ router = APIRouter(prefix="/api/v1/embeddings", tags=["embeddings"])
 )
 @inject
 async def vectorize_chunks(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     request: VectorizeChunksRequestSchema,
     tenant_id: TenantId,
     use_case: VectorizeChunksUseCase = Depends(Provide[Container.vectorize_chunks_use_case]),
@@ -209,7 +209,7 @@ async def vectorize_chunks(
     description="List embeddings with pagination and filtering.",
 )
 async def list_embeddings(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     tenant_id: TenantId,
     content_id: str | None = Query(default=None, description="Filter by content ID"),
     chunk_id: str | None = Query(default=None, description="Filter by chunk ID"),
@@ -235,7 +235,7 @@ async def list_embeddings(
     description="Retrieve a single embedding by ID.",
 )
 async def get_embedding(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     id: str,
     tenant_id: TenantId,
 ):
@@ -257,7 +257,7 @@ async def get_embedding(
     description="Delete a specific embedding.",
 )
 async def delete_embedding(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     id: str,
     tenant_id: TenantId,
 ):

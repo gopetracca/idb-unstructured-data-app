@@ -33,7 +33,27 @@ http://localhost:7071
 
 ### Authentication
 
-All API endpoints require authentication via Azure Functions authentication/authorization. Include appropriate bearer tokens in requests.
+All `/api/v1/*` endpoints require a Microsoft Entra ID bearer token **and** a
+specific App Role (scope) in the token's `roles` claim. The API uses a
+resource-oriented 4-scope model:
+
+| Scope | Grants |
+|-------|--------|
+| `Search` | `POST /api/v1/search`, `/search/operational`, `/search/publications` |
+| `documents.read` | All GET reads (documents, contents, chunks, embeddings) and `/capabilities` |
+| `documents.write` | Uploads, metadata PATCH, pipeline triggers (contents/chunks/embeddings POST) |
+| `admin` | All DELETEs, the entire `/collections/*` surface, and `/analytics/*` |
+
+Verb rule of thumb: GET → `documents.read`, POST/PATCH → `documents.write`,
+DELETE → `admin`; plus `Search` for `/search/*` and `admin` for
+`/collections/*` and `/analytics/*`.
+
+There is **no scope implication**: `admin` does not include `documents.read`.
+Principals needing multiple scopes are assigned multiple App Roles in Entra
+(e.g. an operator gets `admin` + `documents.write` + `documents.read` +
+`Search`). Responses: `401` for a missing/invalid token, `403` for a
+valid token lacking the required scope. When `ENTRA_ID_ENABLED=false` (dev/CI)
+all requests are accepted anonymously with every scope.
 
 ### Common Headers
 

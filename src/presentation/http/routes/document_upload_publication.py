@@ -14,7 +14,7 @@ from src.application.use_cases.upload_and_enqueue_document import (
     UploadAndEnqueueDocumentUseCase,
 )
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.schemas.chunking import UploadChunkingStrategyForm
 from src.presentation.http.schemas.document_schemas import (
     MetadataSchema,
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/v1/documents", tags=["document-management"])
 )
 @inject
 async def upload_publication_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     file: Annotated[UploadFile, File(description="PDF or Word document to upload")],
     tenant_id: TenantId,
     form_data: PublicationDocumentUploadForm = Depends(

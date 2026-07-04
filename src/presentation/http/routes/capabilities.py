@@ -10,7 +10,7 @@ from src.application.use_cases.chunk_document import ChunkDocumentUseCase
 from src.application.use_cases.process_document import ProcessDocumentUseCase
 from src.application.use_cases.vectorize_chunks import VectorizeChunksUseCase
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.schemas.capabilities import (
     CapabilitiesResponse,
     ChunkingStrategyCapability,
@@ -47,7 +47,7 @@ def set_vectorize_chunks_use_case(use_case: VectorizeChunksUseCase) -> None:
 )
 @inject
 async def get_capabilities(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     process_use_case: ProcessDocumentUseCase = Depends(
         Provide[Container.process_document_use_case]
     ),

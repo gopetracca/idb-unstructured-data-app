@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 from src.application.dto.document_analysis import DocumentAnalysisRequest
 from src.application.use_cases.process_document import ProcessDocumentUseCase
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.core.errors import (
     DocumentNotFoundError,
     DocumentProcessingError,
@@ -66,7 +66,7 @@ router = APIRouter(prefix="/api/v1/contents", tags=["contents"])
 )
 @inject
 async def create_content(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     request: DocumentAnalysisRequestSchema,
     tenant_id: TenantId,
     use_case: ProcessDocumentUseCase = Depends(
@@ -189,7 +189,7 @@ async def create_content(
     description="List extracted contents with pagination and filtering by document ID.",
 )
 async def list_contents(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     tenant_id: TenantId,
     document_id: Annotated[
         str | None,
@@ -222,7 +222,7 @@ async def list_contents(
     description="Retrieve metadata for a specific content extraction.",
 )
 async def get_content(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     id: str,
     tenant_id: TenantId,
 ):
@@ -244,7 +244,7 @@ async def get_content(
     description="Retrieve the raw extracted text/markdown content.",
 )
 async def get_content_text(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     id: str,
     tenant_id: TenantId,
 ):
@@ -266,7 +266,7 @@ async def get_content_text(
     description="Delete extracted content (cascades to chunks and embeddings).",
 )
 async def delete_content(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     id: str,
     tenant_id: TenantId,
 ):

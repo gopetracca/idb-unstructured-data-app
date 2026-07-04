@@ -21,7 +21,7 @@ from src.core.errors import (
     DocumentProcessingError,
     UnsupportedFormatError,
 )
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.schemas.document_analysis import (
     DocumentAnalysisRequestSchema,
     DocumentAnalysisResponseSchema,
@@ -72,7 +72,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 )
 @inject
 async def analyze_document(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_WRITE])],
     request: DocumentAnalysisRequestSchema,
     tenant_id: TenantId,
     use_case: ProcessDocumentUseCase = Depends(Provide[Container.process_document_use_case]),
@@ -196,7 +196,7 @@ async def analyze_document(
 )
 @inject
 async def get_supported_formats(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.DOCUMENTS_READ])],
     use_case: ProcessDocumentUseCase = Depends(Provide[Container.process_document_use_case]),
 ) -> list[str]:
     """
