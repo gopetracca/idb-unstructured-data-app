@@ -97,7 +97,7 @@ class ChunkDocumentRequestSchema(BaseModel):
     """Request schema for document chunking endpoint."""
 
     file_id: str = Field(..., description="Unique file identifier (UUID)")
-    tenant_id: str = Field(default="default", description="Tenant identifier")
+    # tenant_id is resolved server-side (issue #143); not accepted from the client.
     source_container: str = Field(
         default="text",
         description="Source blob container name (contains extracted text)",
@@ -116,7 +116,6 @@ class ChunkDocumentRequestSchema(BaseModel):
             "examples": [
                 {
                     "file_id": "550e8400-e29b-41d4-a716-446655440000",
-                    "tenant_id": "default",
                     "source_container": "text",
                     "output_container": "chunks",
                     "chunking_strategy": {

@@ -10,6 +10,7 @@ from src.config.settings import get_settings
 from src.container import Container
 from src.presentation.http.auth.errors import AuthenticationError, AuthorizationError
 from src.presentation.http.auth.models import CurrentUser
+from src.presentation.http.auth.scopes import Scopes
 from src.presentation.http.auth.token_validator import TokenValidator
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ _ANONYMOUS_USER = CurrentUser(
     user_id="anonymous",
     tenant_id="local",
     email="dev@local",
-    roles=["api.read", "api.write", "api.admin"],
+    roles=[scope.value for scope in Scopes],
 )
 
 

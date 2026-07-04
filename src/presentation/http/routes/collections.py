@@ -5,7 +5,7 @@ import uuid
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, Header, HTTPException, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Security, status
 
 from src.application.dto.collection_dto import (
     ConfigureRerankerInput,
@@ -20,7 +20,8 @@ from src.application.dto.ingestion_dto import (
 from src.application.use_cases.ingest_documents import IngestDocumentsUseCase
 from src.application.use_cases.manage_collection import ManageCollectionUseCase
 from src.container import Container
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
+from src.presentation.http.tenant import TenantId
 from src.core.errors import (
     IndexAlreadyExistsError,
     IndexNotFoundError,
@@ -81,12 +82,9 @@ router = APIRouter(prefix="/api/v1/collections", tags=["collections"])
 )
 @inject
 async def create_collection(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     request: CreateCollectionRequest,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
 ) -> CreateCollectionResponse:
     """
@@ -94,7 +92,7 @@ async def create_collection(
 
     Args:
         request: Collection creation request
-        x_tenant_id: Tenant identifier from header
+        tenant_id: Tenant identifier from header
         use_case: Injected ManageCollectionUseCase
 
     Returns:
@@ -114,7 +112,7 @@ async def create_collection(
     try:
         # Convert HTTP schema to application DTO
         input_dto = CreateCollectionInput(
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             name=request.name,
             vector_dimension=request.vector_dimension,
             embedding_model=request.embedding_model,
@@ -210,18 +208,15 @@ async def create_collection(
 )
 @inject
 async def list_collections(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
+    tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
 ) -> ListCollectionsResponse:
     """
     List all collections.
 
     Args:
-        x_tenant_id: Tenant identifier from header
+        tenant_id: Tenant identifier from header
         use_case: Injected ManageCollectionUseCase
 
     Returns:
@@ -233,13 +228,13 @@ async def list_collections(
     correlation_id = str(uuid.uuid4())
 
     logger.info(
-        f"Received list collections request: tenant='{x_tenant_id}', "
+        f"Received list collections request: tenant='{tenant_id}', "
         f"correlation_id={correlation_id}"
     )
 
     try:
         # Execute use case
-        output = await use_case.list_collections(x_tenant_id, correlation_id)
+        output = await use_case.list_collections(tenant_id, correlation_id)
 
         logger.info(
             f"Listed {output.total_count} collections, "
@@ -322,12 +317,9 @@ async def list_collections(
 )
 @inject
 async def get_collection(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
 ) -> GetCollectionResponse:
     """
@@ -335,7 +327,7 @@ async def get_collection(
 
     Args:
         collection_name: Name of the collection
-        x_tenant_id: Tenant identifier from header
+        tenant_id: Tenant identifier from header
         use_case: Injected ManageCollectionUseCase
 
     Returns:
@@ -354,7 +346,7 @@ async def get_collection(
     try:
         # Convert HTTP request to application DTO
         input_dto = GetCollectionInput(
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             collection_name=collection_name,
             correlation_id=correlation_id,
         )
@@ -447,12 +439,9 @@ async def get_collection(
 )
 @inject
 async def delete_collection(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
 ) -> DeleteCollectionResponse:
     """
@@ -460,7 +449,7 @@ async def delete_collection(
 
     Args:
         collection_name: Name of the collection to delete
-        x_tenant_id: Tenant identifier from header
+        tenant_id: Tenant identifier from header
         use_case: Injected ManageCollectionUseCase
 
     Returns:
@@ -479,7 +468,7 @@ async def delete_collection(
     try:
         # Convert HTTP request to application DTO
         input_dto = DeleteCollectionInput(
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             collection_name=collection_name,
             correlation_id=correlation_id,
         )
@@ -562,13 +551,10 @@ async def delete_collection(
 )
 @inject
 async def configure_reranker(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
     request: ConfigureRerankerRequest,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: ManageCollectionUseCase = Depends(Provide[Container.manage_collection_use_case]),
 ) -> ConfigureRerankerResponse:
     correlation_id = str(uuid.uuid4())
@@ -580,7 +566,7 @@ async def configure_reranker(
 
     try:
         input_dto = ConfigureRerankerInput(
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             collection_name=collection_name,
             enabled=request.enabled,
             semantic_configuration_name=request.semantic_configuration_name,
@@ -665,13 +651,10 @@ async def configure_reranker(
 )
 @inject
 async def ingest_documents(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.ADMIN])],
     collection_name: str,
     request: IngestDocumentsRequest,
-    x_tenant_id: Annotated[
-        str,
-        Header(description="Tenant identifier"),
-    ] = "default",
+    tenant_id: TenantId,
     use_case: IngestDocumentsUseCase = Depends(Provide[Container.ingest_documents_use_case]),
 ) -> IngestDocumentsResponse:
     """
@@ -680,7 +663,7 @@ async def ingest_documents(
     Args:
         collection_name: Name of the target collection
         request: Ingestion request with documents
-        x_tenant_id: Tenant identifier from header
+        tenant_id: Tenant identifier from header
         use_case: Injected IngestDocumentsUseCase
 
     Returns:
@@ -711,7 +694,7 @@ async def ingest_documents(
         ]
 
         input_dto = IngestDocumentsInput(
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             collection_name=collection_name,
             documents=ingestion_docs,
             correlation_id=correlation_id,

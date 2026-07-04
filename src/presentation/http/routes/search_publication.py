@@ -5,7 +5,7 @@ import uuid
 from typing import Annotated, Any
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, Header, HTTPException, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Security, status
 
 from src.application.dto.search_dto import SemanticSearchInput
 from src.application.use_cases.semantic_search import SemanticSearchUseCase
@@ -19,10 +19,11 @@ from src.core.errors import (
     VectorDatabaseError,
 )
 from src.core.value_objects.search_mode import SearchMode
-from src.presentation.http.auth import CurrentUser, get_current_user
+from src.presentation.http.auth import CurrentUser, Scopes, get_current_user
 from src.presentation.http.routes.search_helpers import build_response, map_errors
 from src.presentation.http.schemas.search_publication_schemas import PublicationSearchRequest
 from src.presentation.http.schemas.search_schemas import SemanticSearchResponse
+from src.presentation.http.tenant import TenantId
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ _DISABLED_RESPONSE = {
 
 def _build_input_dto(
     request: PublicationSearchRequest,
-    x_tenant_id: str,
+    tenant_id: str,
     correlation_id: str,
 ) -> SemanticSearchInput:
     """Map PublicationSearchRequest to application DTO.
@@ -69,7 +70,7 @@ def _build_input_dto(
     merged_filters = {**(request.filters or {}), **extra} or None
 
     return SemanticSearchInput(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         query=request.query,
         index_name=request.index_name,
         top_k=request.top_k,
@@ -125,9 +126,9 @@ def _build_input_dto(
 )
 @inject
 async def search_publications(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.SEARCH])],
     request: PublicationSearchRequest,
-    x_tenant_id: Annotated[str, Header(description="Tenant identifier")] = "default",
+    tenant_id: TenantId,
     use_case: SemanticSearchUseCase = Depends(Provide[Container.semantic_search_use_case]),
 ) -> SemanticSearchResponse:
     if not get_settings().publications_search_enabled:
@@ -145,7 +146,7 @@ async def search_publications(
         correlation_id,
     )
     try:
-        input_dto = _build_input_dto(request, x_tenant_id, correlation_id)
+        input_dto = _build_input_dto(request, tenant_id, correlation_id)
         output = await use_case.execute(input_dto)
         logger.info(
             "Publication search completed: results=%d, time=%dms, correlation_id=%s",
