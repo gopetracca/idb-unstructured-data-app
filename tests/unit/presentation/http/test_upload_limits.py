@@ -102,9 +102,15 @@ def test_file_over_limit_but_under_overhead_is_rejected_by_route_guard(
     client: TestClient,
 ) -> None:
     """A file just over the file limit (within the multipart overhead headroom)
-    passes the middleware but is rejected by the bounded route-level read."""
+    passes the middleware but is rejected by the bounded route-level read.
+
+    The use-case provider is overridden so the test isolates the route guard:
+    if the guard failed to raise, the mocked use case would return 201.
+    """
     limit = get_settings().file_upload.max_file_size_bytes
-    response = _upload(client, b"x" * (limit + 1))
+    container = Container()
+    with container.upload_and_enqueue_document_use_case.override(_mock_use_case()):
+        response = _upload(client, b"x" * (limit + 1))
     assert response.status_code == 413
     assert response.json()["error"] == "FileSizeExceeded"
 

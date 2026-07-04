@@ -35,6 +35,10 @@
 .PARAMETER AllowLatest
     Allow deploying the mutable latest tag. Disabled by default.
 
+.PARAMETER ConfigureProbes
+    Also set liveness/readiness/startup probes (/health/live, /health/ready)
+    on the revision. Requires python3 (or python) on PATH.
+
 .EXAMPLE
     .\scripts\deploy_container_app.ps1 `
         -App ca-np-d-aimvp-unstructdata `
@@ -67,7 +71,9 @@ param(
 
     [string]$RevisionSuffix,
 
-    [switch]$AllowLatest
+    [switch]$AllowLatest,
+
+    [switch]$ConfigureProbes
 )
 
 Set-StrictMode -Version Latest
@@ -224,15 +230,55 @@ try {
     Write-Host "Traffic mode      : $(if ($activeRevisionsMode) { $activeRevisionsMode } else { '<unknown>' })"
     Write-Host ""
 
-    Invoke-AzCommand -Arguments @(
-        "containerapp", "update",
-        "--name", $App,
-        "--resource-group", $ResourceGroup,
-        "--image", $fullImage,
-        "--revision-suffix", $RevisionSuffix,
-        "--set-env-vars", "DD_VERSION=$Tag",
-        "--output", "none"
-    )
+    if ($ConfigureProbes.IsPresent) {
+        # Image + DD_VERSION + probes in a single template update (one revision).
+        $python = (Get-Command python3 -ErrorAction SilentlyContinue) ?? (Get-Command python -ErrorAction SilentlyContinue)
+        if (-not $python) {
+            Stop-Deploy "python3 (or python) is required for -ConfigureProbes"
+        }
+
+        $probesScript = Join-Path $PSScriptRoot "containerapp_probes.py"
+        $payloadFile = New-TemporaryFile
+
+        try {
+            $appJson = Invoke-AzValue -Arguments @(
+                "containerapp", "show",
+                "--name", $App,
+                "--resource-group", $ResourceGroup,
+                "-o", "json"
+            )
+
+            $appJson | & $python.Source $probesScript `
+                --image $fullImage `
+                --dd-version $Tag `
+                --revision-suffix $RevisionSuffix `
+                | Set-Content -Path $payloadFile -Encoding utf8
+
+            if ($LASTEXITCODE -ne 0) {
+                Stop-Deploy "containerapp_probes.py failed with exit code $LASTEXITCODE"
+            }
+
+            Invoke-AzCommand -Arguments @(
+                "containerapp", "update",
+                "--name", $App,
+                "--resource-group", $ResourceGroup,
+                "--yaml", $payloadFile.FullName,
+                "--output", "none"
+            )
+        } finally {
+            Remove-Item -Path $payloadFile -ErrorAction SilentlyContinue
+        }
+    } else {
+        Invoke-AzCommand -Arguments @(
+            "containerapp", "update",
+            "--name", $App,
+            "--resource-group", $ResourceGroup,
+            "--image", $fullImage,
+            "--revision-suffix", $RevisionSuffix,
+            "--set-env-vars", "DD_VERSION=$Tag",
+            "--output", "none"
+        )
+    }
 
     $latestRevision = Invoke-AzValue -Arguments @(
         "containerapp", "show",

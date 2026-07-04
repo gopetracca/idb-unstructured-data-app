@@ -30,6 +30,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      # The secrets context is not allowed in step `if:` expressions, so the
+      # migration gate below checks this env mapping instead.
+      SQL_SERVER_DATABASE_URL_MIGRATIONS: ${{ secrets.SQL_SERVER_DATABASE_URL_MIGRATIONS }}
 
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +52,26 @@ jobs:
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
           tenant-id: ${{ vars.TENANT_ID }}
 
+      # Apply alembic migrations before rolling out the new revision: pull the
+      # image being deployed and run its migration runner on this runner (the
+      # runner has network access to SQL Server). A failed migration fails the
+      # pipeline and the deploy never happens. Skipped until the
+      # SQL_SERVER_DATABASE_URL_MIGRATIONS secret is configured on the GitHub
+      # Environment — see docs/AIA-394-database-migrations.md.
+      - name: Run database migrations
+        if: ${{ env.SQL_SERVER_DATABASE_URL_MIGRATIONS != '' }}
+        shell: bash
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
+          IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+        run: |
+          chmod +x scripts/run_migrations_container.sh
+          scripts/run_migrations_container.sh \
+            --acr "$ACR_NAME" \
+            --image "$IMAGE_NAME" \
+            --tag "$IMAGE_TAG"
+
       - name: Deploy Container App revision
         shell: bash
         env:
@@ -63,4 +87,5 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --acr "$ACR_NAME" \
             --image "$IMAGE_NAME" \
-            --tag "$IMAGE_TAG"
+            --tag "$IMAGE_TAG" \
+            --configure-probes
