@@ -1,17 +1,27 @@
-"""Document analysis HTTP routes."""
+"""Document analysis HTTP routes.
+
+NOTE: this router is not currently registered in ``src/main.py`` — the content
+extraction surface was refactored to ``/api/v1/contents`` (see ``contents.py``).
+It is kept importable and secured defensively (AIA-477) so it cannot be wired
+up unauthenticated by mistake.
+"""
 
 import logging
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends, HTTPException, Security, status
 
 from src.application.dto.document_analysis import DocumentAnalysisRequest
 from src.application.use_cases.process_document import ProcessDocumentUseCase
+from src.container import Container
 from src.core.errors import (
     DocumentNotFoundError,
     DocumentProcessingError,
     UnsupportedFormatError,
 )
+from src.presentation.http.auth import CurrentUser, get_current_user
 from src.presentation.http.schemas.document_analysis import (
     DocumentAnalysisRequestSchema,
     DocumentAnalysisResponseSchema,
@@ -21,26 +31,6 @@ from src.presentation.http.schemas.document_analysis import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
-
-# Dependency injection - will be set up by the application
-_use_case: ProcessDocumentUseCase | None = None
-
-
-def get_process_document_use_case() -> ProcessDocumentUseCase:
-    """Get the ProcessDocumentUseCase instance."""
-    if _use_case is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Document processing service not initialized",
-        )
-    return _use_case
-
-
-def set_process_document_use_case(use_case: ProcessDocumentUseCase) -> None:
-    """Set the ProcessDocumentUseCase instance (called during app startup)."""
-    global _use_case
-    _use_case = use_case
 
 
 @router.post(
@@ -81,6 +71,7 @@ def set_process_document_use_case(use_case: ProcessDocumentUseCase) -> None:
 )
 @inject
 async def analyze_document(
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.write"])],
     request: DocumentAnalysisRequestSchema,
     use_case: ProcessDocumentUseCase = Depends(Provide[Container.process_document_use_case]),
 ) -> DocumentAnalysisResponseSchema:
@@ -88,6 +79,7 @@ async def analyze_document(
     Analyze a document and extract text as markdown.
 
     Args:
+        user: Authenticated caller (requires the write scope).
         request: Document analysis request with file_id and container info
         use_case: Injected ProcessDocumentUseCase
 
@@ -202,6 +194,7 @@ async def analyze_document(
 )
 @inject
 async def get_supported_formats(
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=["api.read"])],
     use_case: ProcessDocumentUseCase = Depends(Provide[Container.process_document_use_case]),
 ) -> list[str]:
     """

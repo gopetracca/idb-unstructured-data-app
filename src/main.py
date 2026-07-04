@@ -1,14 +1,13 @@
 """FastAPI application entry point for EA Unstructured Data API.
 
-This module provides the main FastAPI application instance with basic health check
-and echo endpoints for validating the Azure Functions + FastAPI integration.
+This module provides the main FastAPI application instance with a basic health
+check endpoint and the versioned business routers.
 """
 
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
 
 from src.container import Container
 from src.infrastructure.initialization import initialize_storage
@@ -94,51 +93,12 @@ app.include_router(collections_router)
 app.include_router(analytics_router)
 
 
-# Pydantic Models
-class EchoRequest(BaseModel):
-    """Request model for echo endpoint."""
-
-    message: str = Field(..., description="Message to echo back", min_length=1)
-
-
-class EchoResponse(BaseModel):
-    """Response model for echo endpoint."""
-
-    echo: str = Field(..., description="Echoed message")
-
-
 # Route Handlers
 @app.get("/")
 async def root() -> dict[str, str]:
-    """Root endpoint for health check.
+    """Liveness endpoint — process is up, no dependency I/O.
 
     Returns:
         dict[str, str]: Status information with service name.
     """
     return {"status": "ok", "service": "ea-unstructured-data"}
-
-
-@app.post("/echo")
-async def echo_post(request: EchoRequest) -> EchoResponse:
-    """Echo back the provided message via POST request.
-
-    Args:
-        request: EchoRequest containing the message to echo.
-
-    Returns:
-        EchoResponse: Response containing the echoed message.
-    """
-    return EchoResponse(echo=request.message)
-
-
-@app.get("/echo/{message}")
-async def echo_get(message: str) -> EchoResponse:
-    """Echo back the provided message via GET request.
-
-    Args:
-        message: Message to echo back from path parameter.
-
-    Returns:
-        EchoResponse: Response containing the echoed message.
-    """
-    return EchoResponse(echo=message)
