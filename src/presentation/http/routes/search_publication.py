@@ -126,7 +126,7 @@ def _build_input_dto(
 )
 @inject
 async def search_publications(
-    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.SEARCH_QUERY])],
+    user: Annotated[CurrentUser, Security(get_current_user, scopes=[Scopes.SEARCH])],
     request: PublicationSearchRequest,
     tenant_id: TenantId,
     use_case: SemanticSearchUseCase = Depends(Provide[Container.semantic_search_use_case]),

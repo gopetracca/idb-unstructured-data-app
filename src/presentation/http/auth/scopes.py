@@ -7,13 +7,16 @@ app-only (M2M) tokens.
 
 | Scope               | Purpose                                                     |
 | ------------------- | ----------------------------------------------------------- |
-| ``search.query``    | Execute searches (the read-side RAG consumption surface)    |
+| ``Search``          | Execute searches (the read-side RAG consumption surface)    |
 | ``documents.read``  | Read document/content/chunk/vector data; discovery          |
 | ``documents.write`` | Ingest/upload, update metadata, trigger pipeline processing |
 | ``admin``           | Destructive deletes, collection/index admin, analytics      |
 
+``Search`` matches the App Role value that already exists in the Entra app
+registration — scope literals here must mirror the registration exactly.
+
 Verb rule of thumb: GET → ``documents.read``, POST/PATCH → ``documents.write``,
-DELETE → ``admin``; plus ``search.query`` for ``/search/*`` and ``admin`` for
+DELETE → ``admin``; plus ``Search`` for ``/search/*`` and ``admin`` for
 the entire ``/collections/*`` and ``/analytics/*`` surfaces.
 
 There is deliberately **no scope implication in code** — the check in
@@ -28,7 +31,7 @@ from enum import StrEnum
 class Scopes(StrEnum):
     """Scope literals used in route ``Security(..., scopes=[...])`` declarations."""
 
-    SEARCH_QUERY = "search.query"
+    SEARCH = "Search"
     DOCUMENTS_READ = "documents.read"
     DOCUMENTS_WRITE = "documents.write"
     ADMIN = "admin"
