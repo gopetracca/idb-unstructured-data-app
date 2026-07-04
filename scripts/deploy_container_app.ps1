@@ -39,6 +39,10 @@
     Also set liveness/readiness/startup probes (/health/live, /health/ready)
     on the revision. Requires python3 (or python) on PATH.
 
+.PARAMETER RunMigrations
+    Set RUN_DB_MIGRATIONS_ON_STARTUP=true so the new revision applies alembic
+    migrations at startup.
+
 .EXAMPLE
     .\scripts\deploy_container_app.ps1 `
         -App ca-np-d-aimvp-unstructdata `
@@ -73,7 +77,9 @@ param(
 
     [switch]$AllowLatest,
 
-    [switch]$ConfigureProbes
+    [switch]$ConfigureProbes,
+
+    [switch]$RunMigrations
 )
 
 Set-StrictMode -Version Latest
@@ -230,8 +236,13 @@ try {
     Write-Host "Traffic mode      : $(if ($activeRevisionsMode) { $activeRevisionsMode } else { '<unknown>' })"
     Write-Host ""
 
+    $envVars = @("DD_VERSION=$Tag")
+    if ($RunMigrations.IsPresent) {
+        $envVars += "RUN_DB_MIGRATIONS_ON_STARTUP=true"
+    }
+
     if ($ConfigureProbes.IsPresent) {
-        # Image + DD_VERSION + probes in a single template update (one revision).
+        # Image + env vars + probes in a single template update (one revision).
         $python = (Get-Command python3 -ErrorAction SilentlyContinue) ?? (Get-Command python -ErrorAction SilentlyContinue)
         if (-not $python) {
             Stop-Deploy "python3 (or python) is required for -ConfigureProbes"
@@ -239,6 +250,16 @@ try {
 
         $probesScript = Join-Path $PSScriptRoot "containerapp_probes.py"
         $payloadFile = New-TemporaryFile
+
+        $probeArgs = @(
+            $probesScript,
+            "--image", $fullImage,
+            "--dd-version", $Tag,
+            "--revision-suffix", $RevisionSuffix
+        )
+        if ($RunMigrations.IsPresent) {
+            $probeArgs += @("--set-env", "RUN_DB_MIGRATIONS_ON_STARTUP=true")
+        }
 
         try {
             $appJson = Invoke-AzValue -Arguments @(
@@ -248,11 +269,7 @@ try {
                 "-o", "json"
             )
 
-            $appJson | & $python.Source $probesScript `
-                --image $fullImage `
-                --dd-version $Tag `
-                --revision-suffix $RevisionSuffix `
-                | Set-Content -Path $payloadFile -Encoding utf8
+            $appJson | & $python.Source @probeArgs | Set-Content -Path $payloadFile -Encoding utf8
 
             if ($LASTEXITCODE -ne 0) {
                 Stop-Deploy "containerapp_probes.py failed with exit code $LASTEXITCODE"
@@ -269,15 +286,14 @@ try {
             Remove-Item -Path $payloadFile -ErrorAction SilentlyContinue
         }
     } else {
-        Invoke-AzCommand -Arguments @(
+        Invoke-AzCommand -Arguments (@(
             "containerapp", "update",
             "--name", $App,
             "--resource-group", $ResourceGroup,
             "--image", $fullImage,
             "--revision-suffix", $RevisionSuffix,
-            "--set-env-vars", "DD_VERSION=$Tag",
-            "--output", "none"
-        )
+            "--set-env-vars"
+        ) + $envVars + @("--output", "none"))
     }
 
     $latestRevision = Invoke-AzValue -Arguments @(

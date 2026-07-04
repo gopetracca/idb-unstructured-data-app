@@ -64,4 +64,5 @@ jobs:
             --acr "$ACR_NAME" \
             --image "$IMAGE_NAME" \
             --tag "$IMAGE_TAG" \
-            --configure-probes
+            --configure-probes \
+            --run-migrations
