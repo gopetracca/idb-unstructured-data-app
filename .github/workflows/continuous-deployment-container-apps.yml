@@ -63,4 +63,5 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --acr "$ACR_NAME" \
             --image "$IMAGE_NAME" \
-            --tag "$IMAGE_TAG"
+            --tag "$IMAGE_TAG" \
+            --configure-probes

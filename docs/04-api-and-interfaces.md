@@ -55,6 +55,18 @@ Principals needing multiple scopes are assigned multiple App Roles in Entra
 valid token lacking the required scope. When `ENTRA_ID_ENABLED=false` (dev/CI)
 all requests are accepted anonymously with every scope.
 
+### Health Probes
+
+Unauthenticated endpoints used by Azure Container Apps probes (configured by
+`scripts/deploy_container_app.{sh,ps1} --configure-probes`):
+
+| Endpoint | Purpose | Response |
+|----------|---------|----------|
+| `GET /health/live` | Liveness — process is up, no dependency I/O | `200 {"status": "alive", ...}` |
+| `GET /health/ready` | Readiness/startup — SQL Server + Azure AI Search checked concurrently (4s timeout each) | `200` when all pass; `503` with a per-dependency `checks` map otherwise |
+
+`GET /` remains as a legacy liveness alias.
+
 ### Common Headers
 
 | Header | Required | Description | Example |

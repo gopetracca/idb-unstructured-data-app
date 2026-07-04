@@ -270,6 +270,7 @@ class Container(containers.DeclarativeContainer):
             "src.presentation.http.routes.document_management",
             "src.presentation.http.routes.document_upload_operational",
             "src.presentation.http.routes.document_upload_publication",
+            "src.presentation.http.routes.health",
             "src.presentation.http.routes.search",
             "src.presentation.http.routes.search_operational",
             "src.presentation.http.routes.search_publication",

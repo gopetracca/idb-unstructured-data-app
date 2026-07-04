@@ -17,7 +17,11 @@ from src.presentation.http.auth import get_current_user
 from src.presentation.http.auth.scopes import Scopes
 
 # Public operations (no auth, no scope) — keep in sync with test_security_contract.
-_PUBLIC: set[tuple[str, str]] = {("GET", "/")}
+_PUBLIC: set[tuple[str, str]] = {
+    ("GET", "/"),
+    ("GET", "/health/live"),
+    ("GET", "/health/ready"),
+}
 
 _EXPECTED_SCOPES: dict[tuple[str, str], str] = {
     # --- search (read-side RAG consumption) ---

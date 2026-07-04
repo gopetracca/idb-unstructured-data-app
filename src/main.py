@@ -27,6 +27,7 @@ from src.presentation.http.routes.document_upload_operational import (
 from src.presentation.http.routes.document_upload_publication import (
     router as document_upload_publication_router,
 )
+from src.presentation.http.routes.health import router as health_router
 from src.presentation.http.routes.search import router as search_router
 from src.presentation.http.routes.search_operational import router as search_operational_router
 from src.presentation.http.routes.search_publication import router as search_publication_router
@@ -89,6 +90,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(health_router)
 app.include_router(capabilities_router)
 app.include_router(document_management_router)
 app.include_router(document_upload_operational_router)
@@ -107,6 +109,9 @@ app.include_router(analytics_router)
 @app.get("/")
 async def root() -> dict[str, str]:
     """Liveness endpoint — process is up, no dependency I/O.
+
+    Kept for backwards compatibility; the platform probes use /health/live
+    (liveness) and /health/ready (readiness/startup) instead.
 
     Returns:
         dict[str, str]: Status information with service name.

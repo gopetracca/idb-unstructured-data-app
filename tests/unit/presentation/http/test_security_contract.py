@@ -19,7 +19,7 @@ from src.main import app
 _HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 # Operations intentionally reachable without authentication (probes only).
-_AUTH_ALLOWLIST = {"/"}
+_AUTH_ALLOWLIST = {"/", "/health/live", "/health/ready"}
 
 
 @pytest.fixture(scope="module")
