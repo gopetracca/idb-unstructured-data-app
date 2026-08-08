@@ -196,6 +196,34 @@ async def test_forced_refresh_is_allowed_again_after_the_interval() -> None:
 
 
 @pytest.mark.unit
+async def test_cold_start_fetches_even_when_monotonic_is_small() -> None:
+    """Regression guard for a cold-start deadlock.
+
+    time.monotonic() counts from an arbitrary origin — host uptime on Linux. On
+    a freshly booted node it can be smaller than the TTL, so staleness computed
+    against a 0.0 sentinel reads as "fresh" and the very first fetch never
+    happens. Combined with the forced-refresh throttle that left the client with
+    no keys at all, rejecting every token until uptime exceeded the TTL.
+    """
+    client = JwksClient(
+        jwks_uri="https://example.com/keys",
+        ttl_seconds=3600,
+        force_refresh_min_interval_seconds=60,
+    )
+    mock_response = _make_mock_response(MOCK_JWKS)
+
+    with patch("httpx.AsyncClient") as mock_http, patch("time.monotonic", return_value=5.0):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=mock_http.return_value)
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_http.return_value.get = AsyncMock(return_value=mock_response)
+
+        key = await client.get_signing_key("key-1")
+
+    assert key["kid"] == "key-1"
+    assert mock_http.return_value.get.call_count == 1
+
+
+@pytest.mark.unit
 async def test_ttl_refresh_is_not_blocked_by_the_force_throttle() -> None:
     """The throttle governs forced refreshes only; routine TTL refresh is unaffected."""
     throttled = JwksClient(

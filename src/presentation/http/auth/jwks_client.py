@@ -31,8 +31,12 @@ class JwksClient:
         self._ttl_seconds = ttl_seconds
         self._force_refresh_min_interval = force_refresh_min_interval_seconds
         self._keys: dict[str, Any] = {}
-        self._fetched_at: float = 0.0
-        self._forced_at: float = 0.0
+        # -inf, not 0.0: time.monotonic() is measured from an arbitrary origin
+        # (host uptime on Linux). On a freshly booted node monotonic() can be
+        # smaller than the TTL, so `monotonic() - 0.0 >= ttl` is False and the
+        # client would never perform its first fetch.
+        self._fetched_at: float = float("-inf")
+        self._forced_at: float = float("-inf")
         self._lock = asyncio.Lock()
 
     async def get_signing_key(self, kid: str) -> dict[str, Any]:
