@@ -37,11 +37,69 @@ from src.presentation.http.routes.vectorization import router as vectorization_r
 logger = logging.getLogger(__name__)
 
 
+class AuthConfigurationError(RuntimeError):
+    """Startup aborted because authentication is unsafe or unusable as configured."""
+
+
+def verify_auth_configuration(settings) -> None:
+    """Fail closed on an unsafe or unusable authentication configuration (AIA-482).
+
+    Two failure modes, both of which previously produced only a log line:
+
+    1. **Auth disabled outside development.** ``ENTRA_ID_ENABLED`` defaults to
+       false, and when it is false every request resolves to an anonymous user
+       holding every scope. A deploy that forgets the variable therefore serves
+       the entire API unauthenticated. Refusing to start converts that silent
+       exposure into an obvious, immediate deployment failure.
+    2. **Auth enabled but incomplete.** Without a tenant and client id the
+       validator cannot build an issuer, JWKS URI, or audience, so every request
+       would 401 regardless of the token presented.
+
+    ``ALLOW_ANONYMOUS_AUTH=true`` is the deliberate escape hatch for running a
+    non-development build locally; it is never set in a deployed environment.
+
+    Raises:
+        AuthConfigurationError: If the configuration is unsafe or unusable.
+    """
+    if settings.entra_id.enabled:
+        if not settings.entra_id.is_configured:
+            raise AuthConfigurationError(
+                "ENTRA_ID_ENABLED=true but the app registration is not fully configured "
+                "(ENTRA_ID_TENANT_ID and ENTRA_ID_CLIENT_ID are both required). "
+                "Every request would be rejected — refusing to start."
+            )
+        logger.info(
+            "Authentication: Entra ID enabled (tenant=%s, audiences=%s)",
+            settings.entra_id.tenant_id,
+            settings.entra_id.accepted_audiences,
+        )
+        return
+
+    if settings.is_development or settings.allow_anonymous_auth:
+        logger.warning(
+            "Authentication: DISABLED — all requests accepted anonymously "
+            "(environment=%s). This is only permitted outside a deployed environment.",
+            settings.environment,
+        )
+        return
+
+    raise AuthConfigurationError(
+        f"Authentication is disabled (ENTRA_ID_ENABLED=false) in environment "
+        f"'{settings.environment}'. Every endpoint would be reachable without a token. "
+        "Set ENTRA_ID_ENABLED=true, or set ALLOW_ANONYMOUS_AUTH=true to acknowledge "
+        "running without authentication. Refusing to start."
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup and shutdown."""
     # Startup
     logger.info("Starting EA Unstructured Data API")
+
+    # Fail closed before serving traffic — must precede any dependency setup so a
+    # misconfigured deploy dies fast instead of coming up unauthenticated.
+    verify_auth_configuration(get_settings())
 
     # Initialize container and wire dependencies
     container = Container()
@@ -50,18 +108,6 @@ async def lifespan(app: FastAPI):
 
     # Initialize Azure storage containers/tables
     await initialize_storage()
-
-    # Log auth status
-    from src.config.settings import get_settings as _get_settings
-    _settings = _get_settings()
-    if _settings.entra_id.enabled:
-        logger.info(
-            "Authentication: Entra ID enabled (tenant=%s, audience=%s)",
-            _settings.entra_id.tenant_id,
-            _settings.entra_id.effective_audience,
-        )
-    else:
-        logger.warning("Authentication: DISABLED — all requests accepted anonymously")
 
     yield
 

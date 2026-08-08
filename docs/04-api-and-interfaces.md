@@ -34,10 +34,9 @@ http://localhost:7071
 ### Authentication
 
 All `/api/v1/*` endpoints require a Microsoft Entra ID bearer token **and** a
-specific App Role (scope) in the token's `roles` claim. The API uses a
-resource-oriented 4-scope model:
+specific permission. The API uses a resource-oriented 4-permission model:
 
-| Scope | Grants |
+| Permission | Grants |
 |-------|--------|
 | `Search` | `POST /api/v1/search`, `/search/operational`, `/search/publications` |
 | `documents.read` | All GET reads (documents, contents, chunks, embeddings) and `/capabilities` |
@@ -48,12 +47,39 @@ Verb rule of thumb: GET → `documents.read`, POST/PATCH → `documents.write`,
 DELETE → `admin`; plus `Search` for `/search/*` and `admin` for
 `/collections/*` and `/analytics/*`.
 
+#### Two spellings per permission
+
+Each permission exists in the app registration twice, because Entra rejects a
+permission `value` that appears in both `appRoles` and `oauth2PermissionScopes`
+on the same application (`DuplicateValue`). Following the Microsoft Graph
+convention, the application-permission variant carries a `.All` suffix:
+
+| Caller | Flow | Claim | Literal to request |
+|---|---|---|---|
+| User / on-behalf-of (e.g. the MCP server) | auth code, OBO | `scp` | `Search`, `documents.read`, … |
+| Application / service | client credentials | `roles` | `Search.All`, `documents.read.All`, … |
+
+The API authorizes on the **union** of `roles` and `scp`, and treats a
+permission and its `.All` twin as the same permission. A route therefore
+declares one requirement and serves both caller types.
+
+> **Client credentials cannot obtain `scp`.** Delegated scopes are only issued
+> when a user is in the flow. A daemon must be assigned the `.All` App Role.
+
 There is **no scope implication**: `admin` does not include `documents.read`.
-Principals needing multiple scopes are assigned multiple App Roles in Entra
+Principals needing multiple permissions are assigned each one in Entra
 (e.g. an operator gets `admin` + `documents.write` + `documents.read` +
 `Search`). Responses: `401` for a missing/invalid token, `403` for a
-valid token lacking the required scope. When `ENTRA_ID_ENABLED=false` (dev/CI)
-all requests are accepted anonymously with every scope.
+valid token lacking the required permission. When `ENTRA_ID_ENABLED=false`
+(dev/CI only) all requests are accepted anonymously with every permission —
+the app **refuses to start** with auth disabled outside a development
+environment unless `ALLOW_ANONYMOUS_AUTH=true` is set explicitly.
+
+#### Audience
+
+The app registration uses `requestedAccessTokenVersion: 2`, so Entra issues
+`aud` as the **bare client ID**, not `api://{client_id}`. Both forms are
+accepted; set `ENTRA_ID_AUDIENCE` only to pin validation to one exact value.
 
 ### Health Probes
 
