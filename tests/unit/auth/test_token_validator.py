@@ -179,3 +179,122 @@ async def test_unknown_kid_raises_authentication_error() -> None:
 
     with pytest.raises(AuthenticationError, match="Unknown signing key"):
         await validator.validate(token)
+
+
+# ---------------------------------------------------------------------------
+# Audience forms (AIA-675)
+#
+# Entra emits `aud` as the bare client ID for v2 tokens
+# (requestedAccessTokenVersion: 2) and as the api:// identifier URI for v1.
+# The real dev app registration is v2, so accepting only api://{client_id}
+# rejected every token with "Invalid token audience".
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_bare_client_id_audience_is_accepted() -> None:
+    """v2 token shape — this is what the live app registration issues."""
+    private_key, _ = _generate_rsa_key_pair()
+    validator = _make_validator(_make_jwk(private_key))
+
+    token = _make_token(private_key, aud="test-client-id")
+    claims = await validator.validate(token)
+
+    assert claims["aud"] == "test-client-id"
+
+
+@pytest.mark.unit
+async def test_identifier_uri_audience_is_still_accepted() -> None:
+    """v1 token shape — kept working so the setting is not version-sensitive."""
+    private_key, _ = _generate_rsa_key_pair()
+    validator = _make_validator(_make_jwk(private_key))
+
+    token = _make_token(private_key, aud="api://test-client-id")
+    claims = await validator.validate(token)
+
+    assert claims["aud"] == "api://test-client-id"
+
+
+@pytest.mark.unit
+async def test_explicit_audience_override_narrows_accepted_values() -> None:
+    """An explicit ENTRA_ID_AUDIENCE pins validation to exactly that value."""
+    private_key, _ = _generate_rsa_key_pair()
+    settings = EntraIDSettings(
+        enabled=True,
+        tenant_id="test-tenant",
+        client_id="test-client-id",
+        audience="api://custom-audience",
+    )
+    jwks_client = MagicMock(spec=JwksClient)
+    jwks_client.get_signing_key = AsyncMock(return_value=_make_jwk(private_key))
+    validator = TokenValidator(jwks_client=jwks_client, settings=settings)
+
+    assert settings.accepted_audiences == ["api://custom-audience"]
+
+    accepted = await validator.validate(_make_token(private_key, aud="api://custom-audience"))
+    assert accepted["aud"] == "api://custom-audience"
+
+    with pytest.raises(AuthenticationError, match="audience"):
+        await validator.validate(_make_token(private_key, aud="test-client-id"))
+
+
+# ---------------------------------------------------------------------------
+# Calling-application allowlist (AIA-675)
+# ---------------------------------------------------------------------------
+
+
+def _validator_with_allowlist(private_key, allowed: list[str]) -> TokenValidator:
+    settings = EntraIDSettings(
+        enabled=True,
+        tenant_id="test-tenant",
+        client_id="test-client-id",
+        allowed_client_ids=allowed,
+    )
+    jwks_client = MagicMock(spec=JwksClient)
+    jwks_client.get_signing_key = AsyncMock(return_value=_make_jwk(private_key))
+    return TokenValidator(jwks_client=jwks_client, settings=settings)
+
+
+@pytest.mark.unit
+async def test_allowlisted_client_is_accepted() -> None:
+    private_key, _ = _generate_rsa_key_pair()
+    validator = _validator_with_allowlist(private_key, ["allowed-app"])
+
+    token = _make_token(private_key, extra_claims={"azp": "allowed-app"})
+    claims = await validator.validate(token)
+
+    assert claims["azp"] == "allowed-app"
+
+
+@pytest.mark.unit
+async def test_non_allowlisted_client_is_rejected() -> None:
+    private_key, _ = _generate_rsa_key_pair()
+    validator = _validator_with_allowlist(private_key, ["allowed-app"])
+
+    token = _make_token(private_key, extra_claims={"azp": "some-other-app"})
+
+    with pytest.raises(AuthenticationError, match="not allowed"):
+        await validator.validate(token)
+
+
+@pytest.mark.unit
+async def test_appid_claim_is_honoured_when_azp_absent() -> None:
+    """v1-style tokens carry appid rather than azp."""
+    private_key, _ = _generate_rsa_key_pair()
+    validator = _validator_with_allowlist(private_key, ["allowed-app"])
+
+    token = _make_token(private_key, extra_claims={"appid": "allowed-app"})
+    claims = await validator.validate(token)
+
+    assert claims["appid"] == "allowed-app"
+
+
+@pytest.mark.unit
+async def test_empty_allowlist_accepts_any_valid_caller() -> None:
+    private_key, _ = _generate_rsa_key_pair()
+    validator = _make_validator(_make_jwk(private_key))  # no allowlist configured
+
+    token = _make_token(private_key, extra_claims={"azp": "anything-at-all"})
+    claims = await validator.validate(token)
+
+    assert claims["azp"] == "anything-at-all"

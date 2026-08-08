@@ -219,11 +219,15 @@ def _create_processing_events_repository(settings: Settings, session_factory=Non
     return None
 
 
-def _create_jwks_client(jwks_uri: str, ttl_seconds: int):
+def _create_jwks_client(jwks_uri: str, ttl_seconds: int, force_refresh_min_interval_seconds: int):
     """Lazy-import JwksClient to avoid circular imports with auth.dependencies."""
     from src.presentation.http.auth.jwks_client import JwksClient
 
-    return JwksClient(jwks_uri=jwks_uri, ttl_seconds=ttl_seconds)
+    return JwksClient(
+        jwks_uri=jwks_uri,
+        ttl_seconds=ttl_seconds,
+        force_refresh_min_interval_seconds=force_refresh_min_interval_seconds,
+    )
 
 
 def _create_token_validator(jwks_client, settings):
@@ -294,6 +298,9 @@ class Container(containers.DeclarativeContainer):
         _create_jwks_client,
         jwks_uri=settings.provided.entra_id.effective_jwks_uri,
         ttl_seconds=settings.provided.entra_id.jwks_cache_ttl_seconds,
+        force_refresh_min_interval_seconds=(
+            settings.provided.entra_id.jwks_force_refresh_min_interval_seconds
+        ),
     )
 
     token_validator = providers.Singleton(

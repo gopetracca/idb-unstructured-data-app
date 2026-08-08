@@ -66,7 +66,8 @@ class TokenValidator:
                 token,
                 public_key,
                 algorithms=["RS256"],
-                audience=self._settings.effective_audience,
+                # A list: v2 tokens carry the bare client ID, v1 the api:// URI.
+                audience=self._settings.accepted_audiences,
                 issuer=self._settings.issuer,
                 leeway=_LEEWAY_SECONDS,
             )
@@ -79,4 +80,22 @@ class TokenValidator:
         except jwt.exceptions.PyJWTError as exc:
             raise AuthenticationError(f"Token validation failed: {exc}") from exc
 
+        self._assert_client_allowed(claims)
         return claims
+
+    def _assert_client_allowed(self, claims: dict[str, Any]) -> None:
+        """Enforce the optional calling-application allowlist.
+
+        Defense in depth for M2M: a valid token for this audience proves the
+        caller holds *a* client credential in the tenant, not that it is one of
+        the applications we expect. When ENTRA_ID_ALLOWED_CLIENT_IDS is empty
+        the check is skipped and any valid-audience caller is accepted.
+        """
+        allowed = self._settings.allowed_client_ids
+        if not allowed:
+            return
+
+        caller = claims.get("azp") or claims.get("appid")
+        if caller not in allowed:
+            logger.warning("Rejected token from non-allowlisted client application: %s", caller)
+            raise AuthenticationError("Calling application is not allowed")

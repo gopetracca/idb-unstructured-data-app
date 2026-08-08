@@ -530,8 +530,20 @@ class EntraIDSettings(BaseSettings):
     enabled: bool = Field(default=False, description="Enable Entra ID authentication")
     tenant_id: str = Field(default="", description="Azure AD tenant GUID")
     client_id: str = Field(default="", description="API app registration client ID")
-    audience: str = Field(default="", description="Token audience — defaults to api://{client_id}")
+    audience: str = Field(
+        default="",
+        description="Explicit token audience override. When empty, both api://{client_id} "
+        "and the bare {client_id} are accepted (see accepted_audiences).",
+    )
     jwks_cache_ttl_seconds: int = Field(default=3600, description="JWKS cache TTL in seconds")
+    jwks_force_refresh_min_interval_seconds: int = Field(
+        default=60,
+        description="Minimum seconds between unknown-kid forced JWKS refreshes (DoS guard)",
+    )
+    allowed_client_ids: list[str] = Field(
+        default_factory=list,
+        description="Optional azp/appid allowlist (JSON array). Empty = allow any valid audience.",
+    )
 
     @computed_field
     @property
@@ -547,9 +559,39 @@ class EntraIDSettings(BaseSettings):
 
     @computed_field
     @property
+    def accepted_audiences(self) -> list[str]:
+        """Audience values accepted by the token validator.
+
+        Entra emits ``aud`` differently depending on the app registration's
+        ``requestedAccessTokenVersion``:
+
+        - v2 tokens (``requestedAccessTokenVersion: 2``) carry the **bare client
+          ID** GUID.
+        - v1 tokens carry the **identifier URI** (``api://{client_id}``).
+
+        Both are the same resource, so both are accepted unless an explicit
+        ``ENTRA_ID_AUDIENCE`` override is configured. Accepting both removes a
+        silent misconfiguration in which every request fails 401 "Invalid token
+        audience" purely because of the token-version setting.
+        """
+        if self.audience:
+            return [self.audience]
+        return [aud for aud in (f"api://{self.client_id}", self.client_id) if self.client_id]
+
+    @computed_field
+    @property
     def effective_audience(self) -> str:
-        """Resolved audience — explicit override or api://{client_id}."""
+        """Primary audience — the explicit override, else api://{client_id}.
+
+        Retained for logging/diagnostics. Validation uses accepted_audiences.
+        """
         return self.audience or f"api://{self.client_id}"
+
+    @computed_field
+    @property
+    def is_configured(self) -> bool:
+        """True when the settings required to validate a token are all present."""
+        return bool(self.tenant_id and self.client_id)
 
 
 class Settings(BaseSettings):
@@ -620,6 +662,17 @@ class Settings(BaseSettings):
     default_tenant_id: str = Field(
         default="default",
         description="Effective tenant id applied to all requests (DEFAULT_TENANT_ID)",
+    )
+
+    # Fail-closed auth (AIA-482): the anonymous bypass that runs when
+    # ENTRA_ID_ENABLED=false is a dev/CI affordance. Outside a development
+    # environment the app refuses to start with auth disabled unless this
+    # escape hatch is set explicitly — a deploy that forgets ENTRA_ID_ENABLED
+    # must fail loudly instead of serving every endpoint unauthenticated.
+    allow_anonymous_auth: bool = Field(
+        default=False,
+        description="Permit running with authentication disabled outside development "
+        "(ALLOW_ANONYMOUS_AUTH). Never set this in a deployed environment.",
     )
 
     @property

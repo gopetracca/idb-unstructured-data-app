@@ -10,7 +10,7 @@ from src.config.settings import get_settings
 from src.container import Container
 from src.presentation.http.auth.errors import AuthenticationError, AuthorizationError
 from src.presentation.http.auth.models import CurrentUser
-from src.presentation.http.auth.scopes import Scopes
+from src.presentation.http.auth.scopes import Scopes, accepted_literals
 from src.presentation.http.auth.token_validator import TokenValidator
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,39 @@ _ANONYMOUS_USER = CurrentUser(
 )
 
 
+def granted_scopes(claims: dict) -> set[str]:
+    """Return every scope the token grants, from both Entra permission models.
+
+    Entra carries authorization in two different claims depending on how the
+    caller obtained the token, and this API has live consumers of both:
+
+    - ``roles``: a JSON **array** of Entra App Role values. Present on app-only
+      (client-credentials) tokens and on user tokens where the user or their
+      group is assigned to an App Role.
+    - ``scp``: a **space-delimited string** of delegated permission values.
+      Present only when a user is in the flow — including the on-behalf-of
+      exchange the MCP server performs.
+
+    The union is deliberate: a single route declaration serves both M2M and
+    delegated callers without duplicating the scope matrix.
+
+    ``scp`` MUST be split. Passing the raw string to a membership test turns it
+    into substring matching, so a token holding ``documents.readonly`` would
+    satisfy a ``documents.read`` requirement — a privilege escalation.
+    """
+    roles = claims.get("roles") or []
+    if isinstance(roles, str):  # defensive: Entra sends an array, but never trust shape
+        roles = roles.split()
+
+    scp = claims.get("scp") or ""
+    if isinstance(scp, list):  # defensive: some IdPs emit scp as an array
+        scp_values = scp
+    else:
+        scp_values = scp.split()
+
+    return {str(value) for value in (*roles, *scp_values) if value}
+
+
 @inject
 async def get_current_user(
     security_scopes: SecurityScopes,
@@ -35,6 +68,11 @@ async def get_current_user(
     validator: TokenValidator = Depends(Provide[Container.token_validator]),
 ) -> CurrentUser:
     """Resolve the current user from the bearer token.
+
+    Authorization is an exact-match check against the union of the token's
+    ``roles`` (App Roles) and ``scp`` (delegated scopes) claims — see
+    :func:`granted_scopes`. There is no scope implication: ``admin`` does not
+    confer ``documents.read``.
 
     When ENTRA_ID_ENABLED=false, returns a synthetic anonymous user with all
     roles — route handler signatures remain identical across environments.
@@ -45,10 +83,10 @@ async def get_current_user(
         validator:       TokenValidator singleton from the DI container.
 
     Returns:
-        CurrentUser with identity and roles from the validated JWT.
+        CurrentUser with identity and the granted scopes from the validated JWT.
 
     Raises:
-        AuthenticationError: Token is missing, malformed, or invalid.
+        AuthenticationError: Token is missing, malformed, invalid, or lacks identity claims.
         AuthorizationError:  Token is valid but lacks a required scope.
     """
     authenticate_value = (
@@ -67,17 +105,32 @@ async def get_current_user(
 
     claims = await validator.validate(credentials.credentials)
 
-    token_roles: list[str] = claims.get("roles", [])
+    token_scopes = granted_scopes(claims)
     for scope in security_scopes.scopes:
-        if scope not in token_roles:
+        # Either spelling of the permission satisfies the requirement: the
+        # delegated scope (scp) or its App Role twin (roles). Not an implication
+        # — both denote the same permission under different Entra models.
+        if not (accepted_literals(scope) & token_scopes):
             raise AuthorizationError(
                 required=security_scopes.scopes,
                 authenticate_value=authenticate_value,
             )
 
+    # A validly-signed token that omits the identity claims is an authentication
+    # failure, not a server error — read defensively so it cannot surface as a 500.
+    user_id = claims.get("oid")
+    tenant_id = claims.get("tid")
+    if not user_id or not tenant_id:
+        missing = [name for name, value in (("oid", user_id), ("tid", tenant_id)) if not value]
+        logger.warning("Token accepted by signature but missing identity claims: %s", missing)
+        raise AuthenticationError(
+            detail=f"Token missing required identity claims: {', '.join(missing)}",
+            authenticate_value=authenticate_value,
+        )
+
     return CurrentUser(
-        user_id=claims["oid"],
-        tenant_id=claims["tid"],
+        user_id=user_id,
+        tenant_id=tenant_id,
         email=claims.get("preferred_username"),
-        roles=token_roles,
+        roles=sorted(token_scopes),
     )
