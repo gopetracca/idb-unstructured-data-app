@@ -145,13 +145,26 @@
   run's analysis is a silent one. Found by writing the test the review asked for, not by
   reasoning about the code.
 
-## Known limitation, not addressed here
+## Follow-up from review (fourth pass) — the structural fix
 
-`text.json` is written to a fixed path, so a reprocess overwrites the previous run's text
-irreversibly before anything is published. That is the root cause of the case above, and
-the reason its resolution is "make the mismatch visible" rather than "keep the previous run
-intact". Making `text.json` run-scoped as well would remove the whole class — publication
-would become the single reference update, and a failure anywhere before it would leave the
-previous run wholly intact. It is out of scope here: it changes a requirement already
-merged in the `content-extraction` spec and the shape of the `markdown_url` field in the
-`202` response. Worth a change proposal of its own.
+The limitation recorded in the third pass is now fixed, at the reviewer's request: **the
+text output is run-scoped too**, so publication is the single update that records both
+references, and a run either publishes both outputs or publishes nothing.
+
+- Every failure mode collapses into one rule. A run writes its outputs where nothing can
+  reach them, then records both references together. A failure anywhere before that —
+  including in the reference update itself — leaves the previous extraction published,
+  matched and whole, with nothing to roll back and no visible-versus-silent trade to make.
+- The compensating deletes that earlier passes added are gone. What remains is sweeping:
+  outputs a run abandoned, and outputs a newer run superseded.
+- **Concurrency** falls out of the same property. Two overlapping runs each write under
+  their own namespace and move both references in one update, so whichever commits last
+  wins both columns and the row can never name one run's text beside another's analysis.
+  Covered by an interleaving test that forces the worst ordering — run A reaches the
+  publication point, stalls until run B completes, then publishes — and asserts the pair
+  is matched. Verified it catches a torn publish: simulating a non-atomic reference update
+  makes it fail.
+
+This changes two things previously specified: the text output path
+(`{tenant_id}/{file_id}/text/{run}.json`) and consequently the shape of `markdown_url` in
+the `202` response. Both are captured in the `content-extraction` delta and `docs/`.

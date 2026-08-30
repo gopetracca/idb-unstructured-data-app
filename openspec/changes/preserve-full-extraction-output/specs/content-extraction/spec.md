@@ -46,19 +46,17 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
   discarded because nothing references it, and the original failure is the error that
   surfaces
 
-#### Scenario: The reference cannot be recorded after the text output was replaced
+#### Scenario: Recording the references fails
 
-- **WHEN** `text.json` has been stored and recording the blob references then fails
-- **THEN** no raw analysis is left where the un-updated reference could resolve to it, so
-  that reference resolves to nothing rather than to an analysis of a different run, and
-  the failure is reported
+- **WHEN** both outputs have been stored and recording the blob references then fails
+- **THEN** the last completed extraction is still published and still matched, this run's
+  outputs are discarded because nothing references them, and the failure is reported
 
-#### Scenario: Superseded raw analysis is not kept
+#### Scenario: Superseded outputs are not kept
 
-- **WHEN** a re-extraction completes and the reference moves to the new raw analysis, or
-  completes without one and the reference is cleared
-- **THEN** the raw analysis the reference pointed at before is deleted, since the
-  `text.json` it described has been replaced
+- **WHEN** a re-extraction completes and the references move to its outputs
+- **THEN** the text output and raw analysis the references pointed at before are deleted,
+  since nothing can reach them any more
 
 #### Scenario: Document extracted before this capability existed
 
@@ -153,7 +151,7 @@ consumers written against the previous output shape.
 #### Scenario: Successful extraction
 
 - **WHEN** `POST /api/v1/contents` is called with `documents.write` and a `file_id` whose raw blob exists and whose content type is supported
-- **THEN** the document is analysed, the markdown output plus structural elements plus extraction metadata is written to `{tenant_id}/{file_id}/text.json` in the output container, and the response is `202` carrying `file_id`, `status`, `markdown_url`, `correlation_id`, and `processing_time_ms`
+- **THEN** the document is analysed, the markdown output plus structural elements plus extraction metadata is written under `{tenant_id}/{file_id}/text/` in the output container at a path unique to that run, and the response is `202` carrying `file_id`, `status`, `markdown_url`, `correlation_id`, and `processing_time_ms`
 
 #### Scenario: Existing output fields keep their meaning
 

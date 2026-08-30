@@ -114,9 +114,16 @@ class ProcessDocumentUseCase:
 
             source_blob_path = doc.document.raw_blob_ref
 
-            # What this document's raw analysis currently points at, if anything. Kept so
-            # a failed run can be told from a successful one that superseded it.
+            # What this document's outputs currently point at, if anything. Kept so this
+            # run can sweep them once it has published its own, and so a run that never
+            # publishes can leave them exactly as it found them.
+            previous_text_ref = doc.document.text_blob_ref
             previous_analysis_ref = doc.document.analysis_blob_ref
+
+            # Everything this run writes is namespaced under one identifier, so no output
+            # of a concurrent or later run can land on top of it and no two runs' outputs
+            # can be mistaken for each other.
+            run_id = uuid.uuid4().hex
 
             # Check if blob exists
             exists = await self._blob_client.blob_exists(
@@ -164,13 +171,17 @@ class ProcessDocumentUseCase:
             # text.json has to report, so it has to be known before text.json is
             # serialised — which is why this comes first and why it must not touch
             # anything the previous run still owns.
-            analysis_blob_path = await self._store_raw_analysis(request, markdown_output)
+            analysis_blob_path = await self._store_raw_analysis(
+                request, markdown_output, run_id
+            )
             markdown_output.extraction_metadata.raw_analysis_stored = (
                 analysis_blob_path is not None
             )
 
-            # Store markdown output (path format: tenant_id/file_id/text.json)
-            output_blob_path = f"{request.tenant_id}/{request.file_id}/text.json"
+            # Store markdown output under this run's namespace. Nothing published is
+            # overwritten, so up to this point the document still reads exactly as the
+            # last completed run left it.
+            output_blob_path = f"{request.tenant_id}/{request.file_id}/text/{run_id}.json"
             output_data = json.dumps(markdown_output.model_dump(mode="json"), indent=2)
 
             try:
@@ -181,18 +192,14 @@ class ProcessDocumentUseCase:
                     content_type="application/json; charset=utf-8",
                 )
             except Exception:
-                # This run is over and nothing points at its sidecar, so drop it. The
-                # previous run's text.json, analysis.json and references are all still in
-                # place and still describe each other — a failed reprocess leaves a
-                # completed one exactly as it was.
-                await self._discard_unreferenced_analysis(request, analysis_blob_path)
+                await self._discard_run_outputs(request, analysis_blob_path)
                 raise
 
-            # Publish: until the reference moves, the sidecar this run wrote is
-            # unreachable, because the document row is the only way to locate it. When
-            # this run produced no sidecar the reference is cleared rather than left
-            # alone, so it cannot keep pointing at the previous run's analysis while the
-            # text.json beside it says raw_analysis_stored=false.
+            # Publish. Both references move in one update, so the row never holds a text
+            # output from one run beside a raw analysis from another — including when two
+            # extractions of the same document overlap and one commits after the other.
+            # Until this lands, everything above is invisible: the row is the only way to
+            # locate any of it.
             try:
                 await self._pipeline_store.update_blob_references(
                     tenant_id=request.tenant_id,
@@ -202,21 +209,20 @@ class ProcessDocumentUseCase:
                     clear_analysis_blob_ref=analysis_blob_path is None,
                 )
             except Exception:
-                # text.json has a fixed path, so it has already replaced the previous
-                # run's — irreversibly. The row, however, still points at the raw analysis
-                # that described the text now gone, which would read as this run's. The
-                # reference cannot be corrected (the store is what just failed), so the
-                # blob it names is removed instead: a reference that resolves to nothing
-                # is a visible fault, where a reference that resolves to the wrong run's
-                # analysis is a silent one.
-                await self._discard_unreferenced_analysis(request, analysis_blob_path)
-                await self._discard_unreferenced_analysis(request, previous_analysis_ref)
+                # Nothing was published, so the previous run's pair is still whole and
+                # still referenced. Drop only what this run wrote.
+                await self._discard_run_outputs(
+                    request, analysis_blob_path, output_blob_path
+                )
                 raise
 
-            # The superseded sidecar described the text.json this run just replaced, so
-            # nothing can pair with it any more.
-            await self._discard_unreferenced_analysis(
-                request, previous_analysis_ref, superseded_by=analysis_blob_path
+            # The outputs this run replaced are unreachable now that the references have
+            # moved past them.
+            await self._discard_run_outputs(
+                request,
+                previous_analysis_ref,
+                previous_text_ref,
+                keep={output_blob_path, analysis_blob_path},
             )
 
             # Calculate processing time
@@ -285,6 +291,7 @@ class ProcessDocumentUseCase:
         self,
         request: DocumentAnalysisRequest,
         markdown_output: MarkdownOutput,
+        run_id: str,
     ) -> str | None:
         """Persist the verbatim analysis response under a path unique to this run.
 
@@ -294,19 +301,15 @@ class ProcessDocumentUseCase:
         degrades fidelity without breaking the document. The loss is visible afterwards as
         `extraction_metadata.raw_analysis_stored=false` and a null `analysis_blob_ref`.
 
-        The path is run-scoped rather than fixed. A fixed `analysis.json` would be
-        overwritten in place on every reprocess, so a run that later failed to store its
-        text.json would already have destroyed the previous run's raw payload — leaving a
-        published text.json describing an analysis that no longer exists. Locating the
-        sidecar is the reference's job anyway; this codebase never reconstructs blob paths
-        by convention.
+        The path is run-scoped rather than fixed, for the same reason the text output is:
+        nothing a previous run published may be overwritten before this run has published
+        anything of its own. Locating the blob is the reference's job; this codebase never
+        reconstructs blob paths by convention.
         """
         if not self._persist_raw_analysis or markdown_output.raw_analysis is None:
             return None
 
-        blob_path = (
-            f"{request.tenant_id}/{request.file_id}/analysis/{uuid.uuid4().hex}.json"
-        )
+        blob_path = f"{request.tenant_id}/{request.file_id}/analysis/{run_id}.json"
         try:
             await self._blob_client.upload_blob(
                 container=request.output_container,
@@ -331,32 +334,36 @@ class ProcessDocumentUseCase:
         )
         return blob_path
 
-    async def _discard_unreferenced_analysis(
+    async def _discard_run_outputs(
         self,
         request: DocumentAnalysisRequest,
-        blob_path: str | None,
-        superseded_by: str | None = None,
+        *blob_paths: str | None,
+        keep: set[str] | None = None,
     ) -> None:
-        """Delete a sidecar nothing points at any more.
+        """Delete extraction outputs nothing points at.
 
-        Called for this run's sidecar when the text write failed, and for the previous
-        run's once the reference has moved past it. Best-effort in both cases: the blob is
+        Called for a run's own outputs when it failed before publishing, and for the
+        outputs a successful run replaced. Best-effort in both cases: the blobs are
         already unreachable — the document row is the source of truth for content location
-        — so failing to delete it leaks storage rather than exposing a stale pairing, and
+        — so failing to delete one leaks storage rather than exposing anything, and
         `delete_document` sweeps it with the `{tenant_id}/{file_id}/` prefix regardless.
         """
-        if blob_path is None or blob_path == superseded_by:
-            return
-
-        try:
-            await self._blob_client.delete_blob(request.output_container, blob_path)
-        except Exception:
-            logger.warning(
-                "Could not delete an unreferenced raw analysis: file_id=%s, blob_path=%s",
-                request.file_id,
-                blob_path,
-                exc_info=True,
-            )
+        keep = keep or set()
+        for blob_path in blob_paths:
+            if blob_path is None or blob_path in keep:
+                continue
+            try:
+                await self._blob_client.delete_blob(
+                    request.output_container, blob_path
+                )
+            except Exception:
+                logger.warning(
+                    "Could not delete an unreferenced extraction output: file_id=%s, "
+                    "blob_path=%s",
+                    request.file_id,
+                    blob_path,
+                    exc_info=True,
+                )
 
     async def _log_stage_transition(
         self,

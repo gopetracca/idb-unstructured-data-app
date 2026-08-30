@@ -952,7 +952,7 @@ Extract text content from a document using Azure Document Intelligence.
 {
   "file_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "completed",
-  "markdown_url": "text/550e8400-e29b-41d4-a716-446655440000/text.json",
+  "markdown_url": "text/default/550e8400-e29b-41d4-a716-446655440000/text/9f2c1b7e.json",
   "correlation_id": "abc-123-def",
   "processing_time_ms": 1500,
   "created_at": "2026-01-30T10:00:00Z"
@@ -987,8 +987,21 @@ row, which stays the source of truth for where content lives.
 
 | Blob | Column | Contents |
 | --- | --- | --- |
-| `{tenant_id}/{file_id}/text.json` | `text_blob_ref` | The typed extraction output consumed by the pipeline |
+| `{tenant_id}/{file_id}/text/{run}.json` | `text_blob_ref` | The typed extraction output consumed by the pipeline |
 | `{tenant_id}/{file_id}/analysis/{run}.json` | `analysis_blob_ref` | The Document Intelligence response, verbatim |
+
+Both paths carry a per-run component and **neither can be reconstructed** — the two columns
+are the only way to locate either blob. That is what makes publication atomic: a run writes
+its outputs where nothing else can see them, then records both references in a single
+update. Until that update lands the document still resolves to the previous extraction, so
+a run that fails anywhere — including in the reference update itself — leaves the last
+completed extraction published, matched, and whole. Outputs a run abandons, and outputs a
+newer run supersedes, are deleted; if a delete fails the blob is orphaned but unreachable,
+and `delete_document` sweeps it with the document's prefix.
+
+It also means two overlapping extractions cannot interleave into a mixed result: whichever
+commits last wins both columns together, so the row never names one run's text beside
+another run's analysis.
 
 `text.json` carries the markdown *and* the document's structure. Fields are additive: the
 original `extracted_text`, `pages[].text`, `pages[].word_count` and `extraction_metadata`
@@ -1054,17 +1067,6 @@ Two things make this usable rather than merely verbose:
 The raw analysis is the service response as received, including fields this API does not
 model. It exists so that a future need — or a newer service version — does not require
 re-analysing the document, which is the most expensive operation in the pipeline.
-
-Unlike `text.json`, its path is **unique per extraction run**, and `analysis_blob_ref` is
-the only way to locate it — never reconstruct the path. Two consequences worth knowing:
-
-- A re-extraction cannot damage the last completed one. The new response goes to a new
-  path, and the reference moves to it only after `text.json` is safely stored, so a run
-  that fails midway leaves the previous `text.json` and its raw analysis intact and still
-  describing each other.
-- The superseded raw analysis is deleted once the reference has moved past it, so runs do
-  not accumulate one file each. If that delete fails the blob is orphaned but unreachable,
-  and `delete_document` sweeps it with the rest of the document's prefix.
 
 **Settings:**
 

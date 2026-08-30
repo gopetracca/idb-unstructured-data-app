@@ -1,5 +1,6 @@
 """Unit tests for ProcessDocumentUseCase."""
 
+import asyncio
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -152,9 +153,9 @@ class TestProcessDocumentUseCase:
         call_args = mock_blob_client.upload_blob.call_args
         assert call_args[1]["container"] == "text"
         assert call_args[1]["content_type"] == "application/json; charset=utf-8"
-        # Verify output path includes tenant_id: tenant_id/file_id/text.json
-        expected_output_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-        assert call_args[1]["blob_path"] == expected_output_path
+        # Verify output path is namespaced by tenant, file and run
+        expected_output_prefix = text_prefix(sample_tenant_id, sample_file_id)
+        assert call_args[1]["blob_path"].startswith(expected_output_prefix)
 
     async def test_execute_document_not_found_in_index(
         self,
@@ -378,6 +379,21 @@ def analysis_prefix(tenant_id: str, file_id: str) -> str:
     return f"{tenant_id}/{file_id}/analysis/"
 
 
+def text_prefix(tenant_id: str, file_id: str) -> str:
+    """Text outputs are run-scoped for the same reason sidecars are."""
+    return f"{tenant_id}/{file_id}/text/"
+
+
+def text_uploads(mock_blob_client: MagicMock, tenant_id: str, file_id: str) -> dict:
+    """The text uploads recorded for this document, keyed by their run-scoped path."""
+    prefix = text_prefix(tenant_id, file_id)
+    return {
+        path: kwargs
+        for path, kwargs in uploads_by_path(mock_blob_client).items()
+        if path.startswith(prefix)
+    }
+
+
 def sidecar_uploads(mock_blob_client: MagicMock, tenant_id: str, file_id: str) -> dict:
     """The sidecar uploads recorded for this document, keyed by their run-scoped path."""
     prefix = analysis_prefix(tenant_id, file_id)
@@ -449,7 +465,9 @@ class TestRawAnalysisPersistence:
         sidecars = sidecar_uploads(mock_blob_client, sample_tenant_id, sample_file_id)
         # The recorded reference is the one path that can locate the sidecar.
         assert kwargs["analysis_blob_ref"] in sidecars
-        assert kwargs["text_blob_ref"] == f"{sample_tenant_id}/{sample_file_id}/text.json"
+        assert kwargs["text_blob_ref"] in text_uploads(
+            mock_blob_client, sample_tenant_id, sample_file_id
+        )
         assert kwargs["clear_analysis_blob_ref"] is False
 
     async def test_text_json_records_that_the_raw_copy_landed(
@@ -471,9 +489,10 @@ class TestRawAnalysisPersistence:
 
         await use_case.execute(request_)
 
-        text_json = json.loads(
-            uploads_by_path(mock_blob_client)[f"{sample_tenant_id}/{sample_file_id}/text.json"]["data"]
-        )
+        (text_written,) = text_uploads(
+            mock_blob_client, sample_tenant_id, sample_file_id
+        ).values()
+        text_json = json.loads(text_written["data"])
         assert text_json["extraction_metadata"]["raw_analysis_stored"] is True
         # The raw copy lives in analysis.json, not duplicated into text.json.
         assert "raw_analysis" not in text_json
@@ -506,7 +525,10 @@ class TestRawAnalysisPersistence:
         assert kwargs["analysis_blob_ref"] is None
         # Not merely "leave it alone": a re-run must not inherit an earlier sidecar.
         assert kwargs["clear_analysis_blob_ref"] is True
-        text_json = json.loads(uploads[f"{sample_tenant_id}/{sample_file_id}/text.json"]["data"])
+        (text_written,) = text_uploads(
+            mock_blob_client, sample_tenant_id, sample_file_id
+        ).values()
+        text_json = json.loads(text_written["data"])
         assert text_json["extraction_metadata"]["raw_analysis_stored"] is False
         # The structural elements are not gated by the setting.
         assert "tables" in text_json
@@ -551,7 +573,6 @@ class TestRawAnalysisPersistence:
         sample_file_id,
     ):
         """text.json is the pipeline's contract; losing the sidecar only degrades fidelity."""
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
 
         async def upload(container, blob_path, data, content_type=None, **kwargs):
             if blob_path.startswith(analysis_prefix(sample_tenant_id, sample_file_id)):
@@ -573,9 +594,10 @@ class TestRawAnalysisPersistence:
         kwargs = mock_pipeline_store.update_blob_references.call_args.kwargs
         assert kwargs["analysis_blob_ref"] is None
         assert kwargs["clear_analysis_blob_ref"] is True
-        written = [c.kwargs["data"] for c in mock_blob_client.upload_blob.call_args_list
-                   if c.kwargs["blob_path"] == text_path]
-        assert json.loads(written[0])["extraction_metadata"]["raw_analysis_stored"] is False
+        (text_written,) = text_uploads(
+            mock_blob_client, sample_tenant_id, sample_file_id
+        ).values()
+        assert json.loads(text_written["data"])["extraction_metadata"]["raw_analysis_stored"] is False
 
     async def test_raw_payload_with_a_datetime_still_serialises(
         self,
@@ -796,7 +818,7 @@ class TestReprocessingADocumentThatAlreadyHasASidecar:
             persist=False,
         )
 
-        assert store.text_blob_ref == f"{sample_tenant_id}/{sample_file_id}/text.json"
+        assert store.text_blob_ref.startswith(text_prefix(sample_tenant_id, sample_file_id))
         assert store.raw_blob_ref == sample_document_with_pipeline.document.raw_blob_ref
 
 
@@ -811,10 +833,13 @@ class FakeBlobContainer:
     def __init__(self):
         self.blobs: dict[str, str] = {}
         self.fail_on: set[str] = set()
+        self.fail_on_prefix: str | None = None
         self.deleted: list[str] = []
 
     async def upload_blob(self, container, blob_path, data, content_type=None, **kwargs):
-        if blob_path in self.fail_on:
+        if blob_path in self.fail_on or (
+            self.fail_on_prefix and blob_path.startswith(self.fail_on_prefix)
+        ):
             raise RuntimeError(f"blob storage said no: {blob_path}")
         self.blobs[blob_path] = data
         return {"etag": "etag", "url": f"https://blob/{blob_path}"}
@@ -831,14 +856,13 @@ class FakeBlobContainer:
 
 
 class TestACompletedRunSurvivesAFailedReprocess:
-    """A failed re-extraction must leave the last completed one exactly as it was.
+    """A run publishes both outputs at once, or publishes nothing at all.
 
-    text.json sits at a fixed path and is overwritten in place, so the sidecar must not:
-    if both were fixed, a run that stored its analysis and then failed to store its text
-    would have destroyed the previous analysis while the previous text.json stayed
-    published, describing a raw payload that no longer existed. Each run therefore writes
-    its sidecar under its own path, and the document row — the only way to locate it —
-    moves to it only once text.json is safely stored.
+    Every artefact a run writes is namespaced under that run, and the document row is the
+    only way to reach any of it. Publication is the single update that moves both
+    references together. So a run that fails anywhere before that update leaves the last
+    completed extraction untouched — there is no window in which its text has been
+    replaced but its raw analysis has not, and nothing to roll back.
     """
 
     @pytest.fixture
@@ -875,12 +899,30 @@ class TestACompletedRunSurvivesAFailedReprocess:
     async def _complete_first_run(
         self, blobs, adapter, store, sample_markdown_output, request_
     ):
+        """Run once successfully and return the pair it published."""
         await self._run(
             blobs, adapter, store, self._output(sample_markdown_output, "run-1"), request_
         )
-        return store.analysis_blob_ref
+        return store.text_blob_ref, store.analysis_blob_ref
+
+    @staticmethod
+    def _assert_pair_is(blobs, store, text_ref, analysis_ref, marker):
+        """Both references resolve, and both resolve to the same run."""
+        assert store.text_blob_ref == text_ref
+        assert store.analysis_blob_ref == analysis_ref
+        assert json.loads(blobs.blobs[text_ref])["extracted_text"] == f"text from {marker}"
+        assert json.loads(blobs.blobs[analysis_ref])["run"] == marker
 
     async def test_the_first_run_publishes_a_matched_pair(
+        self, blobs, store, mock_document_intelligence_adapter, sample_markdown_output, request_
+    ):
+        text_ref, analysis_ref = await self._complete_first_run(
+            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
+        )
+
+        self._assert_pair_is(blobs, store, text_ref, analysis_ref, "run-1")
+
+    async def test_a_failed_text_write_leaves_the_completed_run_untouched(
         self,
         blobs,
         store,
@@ -890,31 +932,11 @@ class TestACompletedRunSurvivesAFailedReprocess:
         sample_tenant_id,
         sample_file_id,
     ):
-        ref = await self._complete_first_run(
-            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
-        )
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-
-        assert json.loads(blobs.blobs[text_path])["extracted_text"] == "text from run-1"
-        assert json.loads(blobs.blobs[ref])["run"] == "run-1"
-
-    async def test_a_failed_reprocess_leaves_the_completed_run_untouched(
-        self,
-        blobs,
-        store,
-        mock_document_intelligence_adapter,
-        sample_markdown_output,
-        request_,
-        sample_tenant_id,
-        sample_file_id,
-    ):
-        """The regression: run 1 completed, run 2 stores its analysis then fails on text."""
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-        ref = await self._complete_first_run(
+        text_ref, analysis_ref = await self._complete_first_run(
             blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
         )
 
-        blobs.fail_on.add(text_path)
+        blobs.fail_on_prefix = text_prefix(sample_tenant_id, sample_file_id)
         with pytest.raises(DocumentProcessingError):
             await self._run(
                 blobs,
@@ -924,29 +946,26 @@ class TestACompletedRunSurvivesAFailedReprocess:
                 request_,
             )
 
-        # Run 1's pair is intact, still describes itself, and is still what SQL points at.
-        assert json.loads(blobs.blobs[text_path])["extracted_text"] == "text from run-1"
-        assert json.loads(blobs.blobs[ref])["run"] == "run-1"
-        assert store.analysis_blob_ref == ref
-        assert store.text_blob_ref == text_path
+        self._assert_pair_is(blobs, store, text_ref, analysis_ref, "run-1")
 
-    async def test_the_failed_run_leaves_no_sidecar_behind(
+    async def test_a_failed_publish_leaves_the_completed_run_untouched(
         self,
         blobs,
         store,
         mock_document_intelligence_adapter,
         sample_markdown_output,
         request_,
-        sample_tenant_id,
-        sample_file_id,
     ):
-        """Nothing points at run 2's sidecar, so it is dropped rather than left to leak."""
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-        ref = await self._complete_first_run(
+        """The case a fixed text path could not survive: a transient store outage.
+
+        Both outputs of run 2 are written and then abandoned, because the references never
+        moved. Run 1 is still published, still matched, still whole.
+        """
+        text_ref, analysis_ref = await self._complete_first_run(
             blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
         )
+        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
 
-        blobs.fail_on.add(text_path)
         with pytest.raises(DocumentProcessingError):
             await self._run(
                 blobs,
@@ -956,12 +975,34 @@ class TestACompletedRunSurvivesAFailedReprocess:
                 request_,
             )
 
-        sidecars = {
-            path for path in blobs.blobs if path.startswith(
-                analysis_prefix(sample_tenant_id, sample_file_id)
+        self._assert_pair_is(blobs, store, text_ref, analysis_ref, "run-1")
+
+    async def test_an_abandoned_run_leaves_no_outputs_behind(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """Nothing references run 2's outputs, so they are dropped rather than left to leak."""
+        text_ref, analysis_ref = await self._complete_first_run(
+            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
+        )
+        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
+
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-2"),
+                request_,
             )
-        }
-        assert sidecars == {ref}
+
+        assert set(blobs.blobs) == {text_ref, analysis_ref}
 
     async def test_a_failed_first_run_leaves_nothing_behind(
         self,
@@ -973,8 +1014,8 @@ class TestACompletedRunSurvivesAFailedReprocess:
         sample_tenant_id,
         sample_file_id,
     ):
-        """No previous artefacts to protect, and no orphan sidecar either."""
-        blobs.fail_on.add(f"{sample_tenant_id}/{sample_file_id}/text.json")
+        """No previous pair to protect, and no orphans either."""
+        blobs.fail_on_prefix = text_prefix(sample_tenant_id, sample_file_id)
 
         with pytest.raises(DocumentProcessingError):
             await self._run(
@@ -986,25 +1027,22 @@ class TestACompletedRunSurvivesAFailedReprocess:
             )
 
         assert blobs.blobs == {}
+        assert store.text_blob_ref is None
         assert store.analysis_blob_ref is None
 
-    async def test_the_failed_run_survives_a_delete_that_also_fails(
+    async def test_the_completed_run_survives_a_cleanup_delete_that_also_fails(
         self,
         blobs,
         store,
         mock_document_intelligence_adapter,
         sample_markdown_output,
         request_,
-        sample_tenant_id,
-        sample_file_id,
     ):
         """Tidying up is best-effort; the real error is what has to surface."""
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-        ref = await self._complete_first_run(
+        text_ref, analysis_ref = await self._complete_first_run(
             blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
         )
-
-        blobs.fail_on.add(text_path)
+        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
         blobs.delete_blob = AsyncMock(side_effect=RuntimeError("delete refused"))
 
         with pytest.raises(DocumentProcessingError) as exc_info:
@@ -1016,24 +1054,15 @@ class TestACompletedRunSurvivesAFailedReprocess:
                 request_,
             )
 
-        assert "blob storage said no" in str(exc_info.value)
-        # The leaked blob is unreachable: the reference never moved off run 1.
-        assert store.analysis_blob_ref == ref
-        assert json.loads(blobs.blobs[ref])["run"] == "run-1"
+        assert "sql refused" in str(exc_info.value)
+        # The leaked blobs are unreachable: the references never moved off run 1.
+        self._assert_pair_is(blobs, store, text_ref, analysis_ref, "run-1")
 
-    async def test_a_successful_reprocess_replaces_the_pair_and_sweeps_the_old_sidecar(
-        self,
-        blobs,
-        store,
-        mock_document_intelligence_adapter,
-        sample_markdown_output,
-        request_,
-        sample_tenant_id,
-        sample_file_id,
+    async def test_a_successful_reprocess_replaces_the_pair_and_sweeps_the_old_one(
+        self, blobs, store, mock_document_intelligence_adapter, sample_markdown_output, request_
     ):
-        """Run-scoped paths must not accumulate a sidecar per run forever."""
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-        first_ref = await self._complete_first_run(
+        """Run-scoped paths must not accumulate a pair per run forever."""
+        first_text, first_analysis = await self._complete_first_run(
             blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
         )
 
@@ -1045,24 +1074,17 @@ class TestACompletedRunSurvivesAFailedReprocess:
             request_,
         )
 
-        assert store.analysis_blob_ref != first_ref
-        assert json.loads(blobs.blobs[text_path])["extracted_text"] == "text from run-2"
-        assert json.loads(blobs.blobs[store.analysis_blob_ref])["run"] == "run-2"
-        assert first_ref not in blobs.blobs
-        assert first_ref in blobs.deleted
+        self._assert_pair_is(
+            blobs, store, store.text_blob_ref, store.analysis_blob_ref, "run-2"
+        )
+        assert first_text not in blobs.blobs
+        assert first_analysis not in blobs.blobs
 
-    async def test_a_reprocess_without_a_sidecar_sweeps_the_previous_one(
-        self,
-        blobs,
-        store,
-        mock_document_intelligence_adapter,
-        sample_markdown_output,
-        request_,
-        sample_tenant_id,
-        sample_file_id,
+    async def test_a_reprocess_without_a_sidecar_sweeps_the_previous_pair(
+        self, blobs, store, mock_document_intelligence_adapter, sample_markdown_output, request_
     ):
-        """Its text.json is gone, so the old sidecar can no longer be paired with anything."""
-        first_ref = await self._complete_first_run(
+        """Its text is gone, so the old raw analysis can no longer be paired with anything."""
+        first_text, first_analysis = await self._complete_first_run(
             blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
         )
 
@@ -1076,78 +1098,108 @@ class TestACompletedRunSurvivesAFailedReprocess:
         )
 
         assert store.analysis_blob_ref is None
-        assert first_ref not in blobs.blobs
+        assert json.loads(blobs.blobs[store.text_blob_ref])["extracted_text"] == "text from run-2"
+        assert first_text not in blobs.blobs
+        assert first_analysis not in blobs.blobs
 
-    async def test_a_failing_reference_update_does_not_leave_a_mismatched_pair(
+
+class TestConcurrentExtractionsOfTheSameDocument:
+    """Overlapping runs must never publish half of one run beside half of another.
+
+    Two extractions of the same document can be in flight at once — the pipeline does not
+    serialise them. Because each run writes under its own namespace and publishes both
+    references in a single update, whichever run commits last wins *both* columns, and the
+    row always names a text output and a raw analysis from the same run.
+    """
+
+    @pytest.fixture
+    def request_(self, sample_file_id: str, sample_tenant_id: str) -> DocumentAnalysisRequest:
+        return DocumentAnalysisRequest(
+            file_id=sample_file_id,
+            tenant_id=sample_tenant_id,
+            source_container="raw",
+            output_container="text",
+        )
+
+    @pytest.fixture
+    def blobs(self) -> FakeBlobContainer:
+        return FakeBlobContainer()
+
+    @pytest.fixture
+    def store(self, sample_document_with_pipeline) -> StatefulBlobReferences:
+        return StatefulBlobReferences(sample_document_with_pipeline)
+
+    @staticmethod
+    def _output(sample_markdown_output: MarkdownOutput, marker: str) -> MarkdownOutput:
+        return sample_markdown_output.model_copy(
+            update={
+                "extracted_text": f"text from {marker}",
+                "raw_analysis": {"modelId": "prebuilt-layout", "run": marker},
+            }
+        )
+
+    async def test_interleaved_runs_publish_a_matched_pair(
         self,
         blobs,
         store,
         mock_document_intelligence_adapter,
         sample_markdown_output,
         request_,
-        sample_tenant_id,
-        sample_file_id,
     ):
-        """text.json is written before the reference moves, and its path is fixed.
+        """Force the worst interleaving: A writes its outputs, B runs to completion, A publishes."""
+        b_has_published = asyncio.Event()
+        a_has_written_outputs = asyncio.Event()
+        commit_order: list[str] = []
 
-        So a reference update that fails on a reprocess has already replaced the previous
-        text.json, leaving the row pointing at the previous run's raw analysis. That
-        pairing is exactly what must never be readable.
-        """
-        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
-        first_ref = await self._complete_first_run(
-            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
-        )
+        real_update = store.update_blob_references
 
-        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
+        def marker_of(text_ref: str) -> str:
+            return json.loads(blobs.blobs[text_ref])["extracted_text"].removeprefix("text from ")
 
-        with pytest.raises(DocumentProcessingError):
-            await self._run(
+        async def update_blob_references(*args, **kwargs):
+            marker = marker_of(kwargs["text_blob_ref"])
+            if marker == "run-a":
+                # A reaches the publication point first, then stalls until B is done —
+                # the interleaving a non-atomic publish would tear apart.
+                await b_has_published.wait()
+            await real_update(*args, **kwargs)
+            commit_order.append(marker)
+            if marker == "run-b":
+                b_has_published.set()
+
+        store.update_blob_references = update_blob_references
+
+        original_upload = blobs.upload_blob
+
+        async def upload_blob(container, blob_path, data, content_type=None, **kwargs):
+            result = await original_upload(container, blob_path, data, content_type, **kwargs)
+            if "run-a" in str(data) and blob_path.startswith(
+                text_prefix(request_.tenant_id, request_.file_id)
+            ):
+                a_has_written_outputs.set()
+            return result
+
+        blobs.upload_blob = upload_blob
+
+        async def run(marker: str, wait_for_a: bool):
+            if wait_for_a:
+                await a_has_written_outputs.wait()
+            use_case = build_use_case(
                 blobs,
                 mock_document_intelligence_adapter,
                 store,
-                self._output(sample_markdown_output, "run-2"),
-                request_,
+                self._output(sample_markdown_output, marker),
+                persist_raw_analysis=True,
             )
+            return await use_case.execute(request_)
 
-        # run-2's text.json is now published, and the reference could not be corrected.
-        assert json.loads(blobs.blobs[text_path])["extracted_text"] == "text from run-2"
+        await asyncio.gather(run("run-a", False), run("run-b", True))
 
-        # Whatever the stale reference names must not resolve to another run's analysis.
-        # Resolving to nothing is the accepted outcome here: a dangling reference is a
-        # visible fault, where the wrong run's analysis is a silent one.
-        stale_ref = store.analysis_blob_ref
-        assert stale_ref == first_ref
-        assert stale_ref not in blobs.blobs
+        # The interleaving really happened: B committed while A was mid-publish.
+        assert commit_order == ["run-b", "run-a"]
 
-    async def test_a_failing_reference_update_leaves_no_reachable_sidecar_at_all(
-        self,
-        blobs,
-        store,
-        mock_document_intelligence_adapter,
-        sample_markdown_output,
-        request_,
-        sample_tenant_id,
-        sample_file_id,
-    ):
-        """Neither run's raw analysis may be left where the stale reference could find it."""
-        await self._complete_first_run(
-            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
-        )
-        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
-
-        with pytest.raises(DocumentProcessingError):
-            await self._run(
-                blobs,
-                mock_document_intelligence_adapter,
-                store,
-                self._output(sample_markdown_output, "run-2"),
-                request_,
-            )
-
-        remaining = [
-            path
-            for path in blobs.blobs
-            if path.startswith(analysis_prefix(sample_tenant_id, sample_file_id))
-        ]
-        assert remaining == []
+        # And the row names one run's text beside that same run's raw analysis.
+        published_text = json.loads(blobs.blobs[store.text_blob_ref])["extracted_text"]
+        published_analysis = json.loads(blobs.blobs[store.analysis_blob_ref])["run"]
+        assert published_text == f"text from {published_analysis}"
+        assert published_analysis == "run-a"
