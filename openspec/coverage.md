@@ -62,6 +62,7 @@ Keep it current when adding a capability or a top-level source directory.
 | `host.json` | `pipeline-orchestration` (queue host settings) |
 | `scripts/acr_build.*`, `deploy_container_app.*`, `run_migrations_job.sh`, `containerapp_probes.py` | `deployment-and-runtime` |
 | `scripts/get_dev_token.*` | `local-development` |
+| `scripts/show_extraction_output.py` | `content-extraction` (inspection tool for the convert stage's output) |
 | `pyproject.toml` (pytest config), `tests/**` | `local-development` |
 | `.github/workflows/**` | Not specced — CI/CD wiring is described in the workflows themselves and in `deployment-and-runtime` for what it produces |
 

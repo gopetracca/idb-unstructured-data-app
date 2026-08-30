@@ -12,12 +12,24 @@ truth for where its extracted text lives. This is the `convert` stage of the pip
 ### Requirement: Extract Content From A Stored Document
 
 The system SHALL extract text from a document already present in the raw container and
-store the result as JSON in the text container.
+store the result as JSON in the text container. The stored result SHALL include the
+document's structural elements in addition to the markdown, and SHALL remain readable by
+consumers written against the previous output shape.
 
 #### Scenario: Successful extraction
 
 - **WHEN** `POST /api/v1/contents` is called with `documents.write` and a `file_id` whose raw blob exists and whose content type is supported
-- **THEN** the document is analysed, the markdown output plus extraction metadata is written to `{tenant_id}/{file_id}/text.json` in the output container, and the response is `202` carrying `file_id`, `status`, `markdown_url`, `correlation_id`, and `processing_time_ms`
+- **THEN** the document is analysed, the markdown output plus structural elements plus extraction metadata is written under `{tenant_id}/{file_id}/text/` in the output container at a path unique to that run, and the response is `202` carrying `file_id`, `status`, `markdown_url`, `correlation_id`, and `processing_time_ms`
+
+#### Scenario: Existing output fields keep their meaning
+
+- **WHEN** a consumer reads `extracted_text`, `pages[].text`, `pages[].word_count`, or the existing `extraction_metadata` fields from `text.json`
+- **THEN** their names, types, and meaning are unchanged from before this change, and the new fields are additive
+
+#### Scenario: Output written before this change is still readable
+
+- **WHEN** a `text.json` written before this change is deserialised
+- **THEN** it loads successfully and the structural fields default to empty
 
 #### Scenario: Blob reference is the source of truth
 
@@ -74,6 +86,11 @@ SHALL accept PDF, DOCX, PNG, JPEG, TIFF, BMP, and plain text by default.
 - **WHEN** `DOCUMENT_INTELLIGENCE_USE_FAKE` is true
 - **THEN** a fake adapter produces deterministic output after a simulated delay instead of calling Azure
 
+#### Scenario: Fake adapter emits reconstructible structure
+
+- **WHEN** the fake adapter produces output
+- **THEN** it includes at least one table with a column-header row and a merged cell, plus paragraphs with roles and per-page lines, so table reconstruction is exercisable without calling Azure
+
 ### Requirement: Stage Event Logging For Extraction
 
 The system SHALL record a `convert` processing event with status and duration for every
@@ -114,3 +131,140 @@ implemented until they are built.
 
 - **WHEN** `GET /api/v1/contents`, `GET /api/v1/contents/{id}`, `GET /api/v1/contents/{id}/text`, or `DELETE /api/v1/contents/{id}` is called
 - **THEN** the response is `501 Not Implemented`
+
+### Requirement: Full Analysis Result Preserved
+
+The system SHALL preserve the complete analysis result returned by the extraction service
+for every successful extraction, and SHALL NOT discard elements it does not itself consume.
+
+#### Scenario: Raw analysis stored verbatim
+
+- **WHEN** extraction succeeds and `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` is true
+- **THEN** the service response is serialised without filtering and written under
+  `{tenant_id}/{file_id}/analysis/` in the output container at a path unique to that run,
+  and the document's `analysis_blob_ref` is set to that path before the stage reports
+  success
+
+#### Scenario: A run never overwrites another run's raw analysis
+
+- **WHEN** a document that already has a stored raw analysis is extracted again
+- **THEN** the new response is written to a different path, and the previous one remains
+  readable until the reference has moved past it
+
+#### Scenario: Fields unknown to the domain model survive
+
+- **WHEN** the service response contains a field the domain model does not declare
+- **THEN** that field is present in the stored `analysis.json`
+
+#### Scenario: Raw persistence disabled
+
+- **WHEN** `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` is false
+- **THEN** no `analysis.json` is written, `analysis_blob_ref` remains null, and the
+  structured elements in `text.json` are still populated in full
+
+#### Scenario: Raw analysis write fails
+
+- **WHEN** writing `analysis.json` raises
+- **THEN** the failure is logged as a warning, `extraction_metadata.raw_analysis_stored` is
+  false, and the extraction result and its `202` response are unchanged
+
+#### Scenario: Text output fails to store after the raw analysis was written
+
+- **WHEN** the raw analysis has been written and the subsequent `text.json` write fails
+- **THEN** the last completed extraction is unchanged — its `text.json`, its raw analysis
+  and its blob references all still describe each other — the failed run's raw analysis is
+  discarded because nothing references it, and the original failure is the error that
+  surfaces
+
+#### Scenario: Recording the references fails
+
+- **WHEN** both outputs have been stored and recording the blob references then fails
+- **THEN** the last completed extraction is still published and still matched, this run's
+  outputs are discarded because nothing references them, and the failure is reported
+
+#### Scenario: Superseded outputs are not kept
+
+- **WHEN** a re-extraction completes and the references move to its outputs
+- **THEN** the text output and raw analysis the references pointed at before are deleted,
+  since nothing can reach them any more
+
+#### Scenario: Document extracted before this capability existed
+
+- **WHEN** a document's `analysis_blob_ref` is null
+- **THEN** readers treat it as "raw analysis not captured" and no error is raised
+
+### Requirement: Structured Layout Elements In Text Output
+
+The extracted-text output SHALL carry the document's structural elements alongside the
+markdown, including tables, figures, paragraphs with their roles, sections, styles,
+key-value pairs, and per-page lines, words, and selection marks.
+
+#### Scenario: Tables are structured, not only rendered
+
+- **WHEN** the analysed document contains a table
+- **THEN** `text.json` contains that table as `row_count`, `column_count`, the page numbers
+  it appears on, its caption and footnotes when present, and one entry per cell carrying
+  `content`, `row_index`, `column_index`, `row_span`, `column_span`, and `kind`
+
+#### Scenario: A table can be reconstructed without the markdown
+
+- **WHEN** a consumer reads a stored table's cells and ignores `extracted_text`
+- **THEN** every cell's `(row_index, column_index)` extended by its spans tiles the
+  declared `row_count` × `column_count` grid without overlap, so the grid is rebuilt exactly
+
+#### Scenario: Paragraph roles preserved
+
+- **WHEN** the service assigns a paragraph a role such as `title`, `sectionHeading`,
+  `pageHeader`, `pageFooter`, or `footnote`
+- **THEN** that role is present on the corresponding paragraph in `text.json`
+
+#### Scenario: Figures and sections preserved
+
+- **WHEN** the analysed document contains figures or a section hierarchy
+- **THEN** they appear in `text.json` with their captions and element references
+
+#### Scenario: Page structure preserved
+
+- **WHEN** a page is analysed
+- **THEN** its entry in `text.json` carries the service's own page number, `width`,
+  `height`, `unit`, and `angle`, and its lines, words, and selection marks
+
+#### Scenario: No structural elements found
+
+- **WHEN** the service returns no tables, figures, or key-value pairs
+- **THEN** the corresponding fields are present as empty collections and extraction succeeds
+
+### Requirement: Element Offsets And Geometry Preserved
+
+Every preserved element that the service locates SHALL carry its spans into the extracted
+markdown and its bounding regions on the page, so elements can be mapped back to both the
+text and the page image.
+
+#### Scenario: Spans map an element into the markdown
+
+- **WHEN** a table, paragraph, line, word, or cell is stored
+- **THEN** its `spans` are preserved as `(offset, length)` pairs that index into
+  `extracted_text`
+
+#### Scenario: Bounding regions map an element onto the page
+
+- **WHEN** an element carries bounding regions
+- **THEN** the page number and polygon of each region are preserved
+
+### Requirement: Extraction Metadata Reports Preserved Content
+
+Extraction metadata SHALL report what was preserved, so a document processed before this
+capability existed is distinguishable from one processed after.
+
+#### Scenario: Counts recorded
+
+- **WHEN** extraction completes
+- **THEN** `extraction_metadata` carries the number of tables, figures, and paragraphs
+  preserved, alongside the existing page count, word count, confidence, method, and API
+  version
+
+#### Scenario: Raw storage flag recorded
+
+- **WHEN** extraction completes
+- **THEN** `extraction_metadata.raw_analysis_stored` states whether `analysis.json` was
+  written
