@@ -11,7 +11,10 @@
 - [ ] 1.2 Replace `TableCell.kind: str` with `role: CellRole`, keeping `kind` readable as
       a deprecated alias so a pre-change `text.json` still loads.
 - [ ] 1.3 Add to `ExtractedTable`: `header_rows: list[int]`, `rendered: str`,
-      `header_rendered: str`.
+      `render_prefix: str` (opening markup plus header rows), `render_suffix: str`, and
+      `rows: list[TableRow]` holding the body rows.
+- [ ] 1.3a Add `TableRow`: `row_index`, `rendered`, `source_range: tuple[int, int] | None`,
+      `continues_from_row: int | None`.
 - [ ] 1.4 Add `blocks: list[ContentBlock]` to `MarkdownOutput`, defaulting to empty.
 - [ ] 1.5 Confirm a pre-change `text.json` still deserialises, with empty blocks and cell
       roles mapped from the old `kind` strings.
@@ -33,9 +36,13 @@
       others → paragraph, with the role preserved).
 - [ ] 3.2 Map cell `kind` strings to `CellRole`; derive `header_rows` from the cells that
       carry a header role.
-- [ ] 3.3 Populate `rendered` from the table's span into `content`, and `header_rendered`
-      from the header rows' spans — both taken from the markdown, not re-serialised, so
-      they are exactly what a consumer would have found in the text.
+- [ ] 3.3 Populate `rendered` from the table's span into `content`. Derive `render_prefix`,
+      `rows` and `render_suffix` by partitioning that rendering at `</tr>` boundaries —
+      partitioning a string the adapter already has, never reassembling one from cell
+      spans, which cover cell content only and would exclude the markup.
+- [ ] 3.3a Record each body row's `source_range` from its offset within the table's span,
+      and set `continues_from_row` for rows covered by a cell with a row span greater
+      than one.
 - [ ] 3.4 Convert `boundingRegions[].polygon` to a canonical `BoundingBox` with
       `unit=inch`, `origin=top_left`, retaining the polygon.
 - [ ] 3.5 Fake adapter: same canonical output, including a table whose `rendered` and
@@ -55,10 +62,15 @@
 - [ ] 5.2 `tests/unit/infrastructure/adapters/test_document_intelligence_azure.py` — from
       the existing fixture: blocks in reading order, every block's span resolves against
       `extracted_text`, header rows derived from roles, `rendered` equal to the text at the
-      table's span, `header_rendered` equal to the header rows' text.
+      table's span.
+- [ ] 5.2a The exactness rule: `render_prefix` + every row + `render_suffix` equals
+      `rendered`, byte for byte, for a contiguously rendered table.
+- [ ] 5.2b A table with an empty cell, and one with a cell spanning two rows: rows still
+      partition the rendering, and the covered rows are marked `continues_from_row`.
 - [ ] 5.3 A contract test that any extractor adapter must pass — offset invariant, canonical
-      roles, header rows, rendered strings — parameterised over the adapters that exist, so
-      a future Docling adapter inherits the same bar.
+      roles, header rows, the exactness rule, and composability of an arbitrary row subset
+      into a valid table — parameterised over the adapters that exist, so a future Docling
+      adapter inherits the same bar.
 - [ ] 5.4 Fake adapter passes the same contract test.
 - [ ] 5.5 Live test: the offset invariant and `rendered` hold against the real service.
 

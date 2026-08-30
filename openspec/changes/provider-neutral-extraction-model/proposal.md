@@ -49,10 +49,21 @@ stages consume, so no consumer knows or cares which service produced it.
   Intelligence's `kind` string and Docling's `column_header`/`row_header`/`row_section`
   booleans both map onto it. Each table also carries `header_rows`: the row indices that
   form its header, computed by the adapter.
-- **The adapter renders, the consumer never parses.** Each table carries `rendered` (its
-  text exactly as it appears in `text`) and `header_rendered` (its header rows in the same
-  form). A consumer that needs a table's text uses those strings; it never pattern-matches
-  the rendering. This is the field that makes HTML-vs-pipe-table a non-question.
+- **The adapter renders, the consumer never parses — including for parts of a table.**
+  A table carries `rendered` (its text exactly as it appears in `text`) and, so that a
+  consumer can emit *some rows* of it without knowing the markup: `render_prefix` (the
+  opening markup plus the header rows), `render_suffix` (the closing markup), and `rows`
+  (the body rows, each with its own rendering). Any subset renders as
+  `render_prefix + rows… + render_suffix`, which is a valid table in whatever form the
+  extractor produced. This is what makes HTML-vs-pipe-table a non-question — and it is
+  needed because cell spans do **not** delimit rendered rows: on a real Document
+  Intelligence response, the min-to-max span of row 0's cells is `Budget Summary`, while
+  the row's actual rendering is `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`. Slicing
+  a table at cell spans yields fragments that are not tables.
+- **Rows carry their own provenance.** Each body row records where its rendering sits in
+  `text` when that range is contiguous, and records when a vertically merged cell makes it
+  inseparable from the row above — so a consumer can find a legal cut point without
+  reasoning about markup or spans.
 - **Explicit geometry units.** Document Intelligence reports inches from a top-left
   origin; Docling reports points and can use either origin. The canonical bounding box
   records `unit` and `origin` rather than assuming, so nothing silently compares

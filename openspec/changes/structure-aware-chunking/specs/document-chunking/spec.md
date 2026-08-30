@@ -53,6 +53,19 @@ between rows and repeating the table's header rows in every piece.
 - **THEN** it begins with the table's header rows, so the columns its values belong to can
   be determined from the chunk alone
 
+#### Scenario: Pieces are composed, not sliced
+
+- **WHEN** a piece of a table is emitted
+- **THEN** its text is composed from the renderings the extractor supplied — the table's
+  opening rendering, the piece's rows, and the closing rendering — and the stage does not
+  cut the extracted text at positions derived from cell spans
+
+#### Scenario: Rows joined by a merged cell stay together
+
+- **WHEN** a table contains a cell spanning several rows
+- **THEN** no cut falls between those rows, so no piece is missing content rendered only in
+  the first of them
+
 #### Scenario: A single row larger than the chunk size
 
 - **WHEN** one row's rendering alone exceeds the chunk size
@@ -91,6 +104,28 @@ it holds.
 - **WHEN** a chunk holds part of a split table
 - **THEN** it additionally records the range of table rows it covers, so a partial table is
   distinguishable from a whole one
+
+### Requirement: Chunk Offsets Record Provenance
+
+A chunk's character offsets SHALL identify where its own content came from in the extracted
+text, and SHALL NOT be relied upon as an instruction for slicing that text.
+
+#### Scenario: A chunk whose text is a verbatim slice
+
+- **WHEN** a chunk carries no content prepended from elsewhere
+- **THEN** its offsets delimit exactly the text it holds, as before
+
+#### Scenario: A table piece carrying a repeated header
+
+- **WHEN** a piece of a split table is emitted with the table's header prepended
+- **THEN** its offsets delimit the rows the piece itself covers, and the piece additionally
+  records the source range of the prepended header and that it carries one
+
+#### Scenario: Length is taken from the text
+
+- **WHEN** a consumer reports a chunk's character count
+- **THEN** it is derived from the chunk's text rather than from the difference between its
+  offsets, which excludes any prepended content
 
 ## MODIFIED Requirements
 

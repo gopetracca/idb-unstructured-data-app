@@ -7,10 +7,12 @@
 - [ ] 1.1 Add a pure partitioner in `src/core/` that takes the block list, the extracted
       text, and a chunk size, and returns regions marked prose or table — no chunker,
       provider, or IO knowledge.
-- [ ] 1.2 Table splitting: cut only at row boundaries derived from cell spans; prefix
-      pieces after the first with `header_rendered`; emit an oversized chunk for a single
-      row that cannot fit, and log it.
-- [ ] 1.3 Record the row range each piece covers.
+- [ ] 1.2 Table splitting: cut only between the body rows the extractor supplied — never
+      at positions derived from cell spans — and never between a row and one marked as
+      continuing from it. Compose each piece as `render_prefix + rows + render_suffix`.
+      Emit an oversized chunk for a single indivisible group that cannot fit, and log it.
+- [ ] 1.3 Record the row range each piece covers, the source range of its own rows, and the
+      source range of the prefix it carries.
 
 ## 2. Stage
 
@@ -27,12 +29,19 @@
       `table_handler.py` for the fallback only, with a docstring saying so.
 - [ ] 3.2 Confirm `chunker_llamaindex.py` now gets table handling with no change of its own.
 
-## 4. Metadata and schema
+## 4. Metadata, offsets and schema
 
 - [ ] 4.1 Add the row range to `ChunkMetadata`; check whether the search index schema should
       carry it (`src/core/index_schemas/chunk_fields.py`) or whether it stays chunk-local.
 - [ ] 4.2 Update `has_table`'s description — it currently says "contains an HTML table",
       which will no longer be true.
+- [ ] 4.3 Restate `start_char`/`end_char` on `Chunk` and `ChunkIndex` as provenance of the
+      chunk's own content, and add the prepended-header source range and flag.
+- [ ] 4.4 Fix `list_chunks.py:59`, which computes `char_count = end_char - start_char` and
+      would under-report any piece carrying a repeated header. Take the length from the
+      text.
+- [ ] 4.5 Audit every other reader of these offsets for the same assumption before
+      changing their meaning.
 
 ## 5. Tests
 
@@ -48,6 +57,12 @@
       size must not produce a single chunk exceeding it.
 - [ ] 5.6 A split table yields no whole-table chunk, every row appears in exactly one piece,
       and all pieces share one `table_id` with distinct row ranges.
+- [ ] 5.7 Offsets: a prose chunk's text equals the slice at its offsets; a table piece with a
+      repeated header does not, and records the header's source range and the flag instead.
+- [ ] 5.8 A table with a cell spanning rows is never cut between those rows.
+- [ ] 5.9 Composition, not slicing: pieces are byte-identical to
+      `render_prefix + rows + render_suffix`, and no piece is a slice of `extracted_text`
+      taken at cell-span positions.
 
 ## 6. Evidence
 

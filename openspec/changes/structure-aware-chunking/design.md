@@ -26,13 +26,20 @@ asymmetry between the two adapters.
 
 When a table exceeds the chunk size:
 
-1. Cut only at row boundaries. Cell spans give the character range of each row, so a cut
-   point is the end of a row that fits.
-2. Prefix every piece after the first with `header_rendered`.
-3. Record the row range each piece covers.
+1. Cut only between body rows, using the row renderings the extractor supplies. **Not**
+   using cell spans: those cover cell content and exclude the markup around it, so slicing
+   there produces fragments that are not tables. On a real Document Intelligence response
+   the min-to-max span over row 0's cells is `Budget Summary`, where the row's rendering is
+   `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`.
+2. Compose each piece as `render_prefix + its rows + render_suffix`. Because the prefix
+   carries the header rows, every piece — including the first — is a valid table with its
+   header, by concatenation alone.
+3. Never cut between a row and one marked as continuing from it, so a cell spanning several
+   rows stays with the rows it covers.
+4. Record the row range each piece covers.
 
-A piece is therefore always a valid table in the extractor's own rendering, which keeps the
-guarantee that nothing downstream needs to parse anything.
+A piece is therefore always a valid table in the extractor's own rendering, and the stage
+composes it without knowing whether that rendering is HTML, pipe tables, or anything else.
 
 **A single row larger than the chunk size** is emitted whole and oversized rather than cut
 mid-row. Cutting inside a row destroys the value-to-column association, which is the only
@@ -42,6 +49,30 @@ mangled row is a correctness problem. The case is logged so it is visible.
 **Header repetition costs tokens.** A ten-piece split of a table with a three-row header
 embeds that header ten times. That is the intended trade: the alternative is nine pieces
 whose columns are anonymous.
+
+## Decision: offsets mean provenance, not a slice
+
+`Chunk.start_char` / `end_char` are described today as "position in source text", and for
+every chunk the pipeline currently produces, `text == extracted_text[start_char:end_char]`.
+Repeating the header breaks that: a piece holding rows 40–60 has text that begins with rows
+that live elsewhere in the source. The offsets can no longer be both a provenance record
+and a slice instruction.
+
+They become provenance. `start_char` / `end_char` delimit the range the chunk's **own rows**
+occupy in `extracted_text` — contiguous, and the same rule for the first piece as for the
+rest, because a uniform rule is worth more than saving one special case. Content prepended
+from elsewhere is recorded separately: the piece carries the source range of the prefix it
+was given, and a flag saying it carries one.
+
+This has one consumer today. `list_chunks.py` computes `char_count = end_char - start_char`,
+which would under-report the length of any piece carrying a repeated header. It must derive
+the count from the chunk's text instead. That is the kind of thing that would otherwise be
+found months later as "the character counts look slightly wrong for tables".
+
+The alternative — keeping offsets exact by not repeating the header — sacrifices the
+property that makes a piece independently interpretable, which is the point of the change.
+The other alternative — storing the composed text's own offsets — is meaningless, since the
+composed text exists nowhere but in the chunk.
 
 ## Decision: measure retrieval rather than assert it
 

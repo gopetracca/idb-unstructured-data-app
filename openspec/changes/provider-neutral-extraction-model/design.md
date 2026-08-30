@@ -47,10 +47,42 @@ This is the field that removes the regex. `table_handler.extract_tables` exists 
 because the chunker needed to know where a table started and ended in the text and had
 only the rendering to go on. With spans and `rendered`, that question is answered by data.
 
-`header_rendered` is computed by the adapter rather than the consumer because computing it
-requires knowing which rows are headers *and* how the provider renders a table — both
-adapter-side facts. For Document Intelligence it is the `<tr>` rows whose cells carry
-`kind: columnHeader`; for Docling it is the pipe-table header row plus its separator.
+The prefix/suffix pair exists because a consumer emitting part of a table needs to produce
+a *valid* table, and validity is a property of the rendering. `render_prefix` is the
+opening markup plus the header rows; `render_suffix` closes it; `rows` holds the body rows
+individually. Any subset is then `render_prefix + those rows + render_suffix`, composed by
+concatenation and nothing else.
+
+For Document Intelligence, the adapter partitions the HTML it already has at `</tr>`
+boundaries: prefix is `<table>` plus the header `<tr>` elements, each body row is one
+`<tr>…</tr>`, suffix is `</table>`. For Docling it is the pipe header plus its separator
+line, one line per row, and an empty suffix. Both are provider-specific parsing done in the
+provider-specific place, once.
+
+**Why not cell spans.** An earlier draft of the dependent change proposed cutting tables at
+row boundaries derived from cell spans. That is wrong, and checkably so. Document
+Intelligence spans cover cell *content*, not the markup around it: on a real response the
+span of the cell `Budget Summary` resolves to exactly `Budget Summary`, so the min-to-max
+range over row 0's cells is that same string, while the row's rendering is
+`<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`. Cutting there produces text that is not
+a table in any rendering. Three further cases break the same assumption: an empty cell may
+carry no span at all, so a row of empty cells has no derivable range; a vertically merged
+cell belongs to several rows but spans only where its content sits; and a cell's content
+may arrive as several discontiguous spans.
+
+**The exactness rule.** For a table whose rendering is contiguous in `text`,
+`render_prefix + every row's rendering + render_suffix` SHALL equal `rendered` exactly. The
+adapter can guarantee this by construction, because it partitions a string it produced
+rather than reassembling one it inferred — and the equality is a cheap, decisive test that
+an adapter has done the partition correctly.
+
+**Merged cells across rows.** A cell spanning several rows makes those rows inseparable:
+its content is rendered once, in the first of them, and a piece containing only the later
+rows would silently lose it. Each row therefore records `continues_from_row` when it is
+covered by a vertical span originating above it. Consumers treat such rows as one
+indivisible group. The alternative — repeating the spanning cell's content in each piece,
+as the header is repeated — was rejected: the header is a label whose repetition is
+unambiguous, while repeating a data cell fabricates rows that were never in the document.
 
 ## Decision: `header_rows` is indices, not cells
 

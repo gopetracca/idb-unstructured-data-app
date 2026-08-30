@@ -40,8 +40,15 @@ blocks rather than from a regex.
   behaviour whether the extractor rendered HTML, pipe tables, or anything else.
 - **Oversized tables split on row boundaries, with the header repeated.** When a table
   exceeds the strategy's chunk size, it is split between rows — never inside one — and
-  every piece is prefixed with the table's header rows. Each piece is independently
-  interpretable: a chunk holding rows 40–60 still says which columns those values are in.
+  every piece is composed from the renderings the extractor supplied, so it is a valid
+  table carrying the header. Each piece is independently interpretable: a chunk holding
+  rows 40–60 still says which columns those values are in. Rows joined by a cell that spans
+  them are never separated.
+- **Chunk offsets become provenance.** A piece carrying a repeated header is no longer a
+  verbatim slice of the extracted text, so `start_char`/`end_char` are restated as the
+  range the chunk's own rows occupy, with the prepended header's range recorded separately.
+  One consumer is affected today — `list_chunks` derives a character count by subtracting
+  the offsets — and is corrected here rather than left to be discovered.
 - **Table chunks carry the extractor's rendering.** Chunk text comes from the canonical
   `rendered` string, so what is embedded and what is shown is whatever form the extractor
   produced, and the pipeline stops caring which.

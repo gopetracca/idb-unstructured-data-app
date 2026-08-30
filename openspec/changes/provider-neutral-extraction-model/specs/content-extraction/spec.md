@@ -63,14 +63,46 @@ are the same regardless of which service produced them.
 
 #### Scenario: Table text is provided, not derived
 
-- **WHEN** a consumer needs a table's text or its header's text
-- **THEN** both are available as strings the extractor produced, in the same form they take
-  in `extracted_text`, so that no consumer parses the rendering to recover them
+- **WHEN** a consumer needs a table's text
+- **THEN** it is available as a string the extractor produced, in the same form it takes in
+  `extracted_text`, so that no consumer parses the rendering to recover it
+
+#### Scenario: Part of a table can be rendered without knowing the markup
+
+- **WHEN** a consumer needs to emit only some rows of a table
+- **THEN** the table provides an opening rendering that includes its header rows, a closing
+  rendering, and each body row's own rendering, such that concatenating the opening, any
+  selection of body rows, and the closing yields a valid table in the extractor's form
+
+#### Scenario: The parts reconstruct the whole exactly
+
+- **WHEN** a table's rendering is contiguous in `extracted_text`
+- **THEN** concatenating its opening rendering, all of its body rows in order, and its
+  closing rendering equals its full rendering exactly
+
+#### Scenario: Rows carry their own source range
+
+- **WHEN** a body row's rendering occupies a contiguous range of `extracted_text`
+- **THEN** the row records that range; and where it does not, the row records no range
+  rather than an approximate one
+
+#### Scenario: Rows joined by a merged cell are marked inseparable
+
+- **WHEN** a cell spans several rows
+- **THEN** the rows it covers below its first are marked as continuing from that row, so a
+  consumer can avoid separating them from the content rendered only in the first
+
+#### Scenario: Cell spans are not row boundaries
+
+- **WHEN** a consumer needs the extent of a rendered row
+- **THEN** it uses the row's own rendering or recorded range, because cell spans cover cell
+  content only and exclude the markup around it, are absent for empty cells, and may be
+  discontiguous within a single cell
 
 #### Scenario: Rendering is not constrained
 
 - **WHEN** an extractor renders tables as HTML and another renders them as pipe tables
-- **THEN** both satisfy this specification, and a consumer reading the provided strings
+- **THEN** both satisfy this specification, and a consumer composing the provided strings
   behaves identically for either
 
 ## MODIFIED Requirements
