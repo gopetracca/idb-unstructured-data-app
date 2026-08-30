@@ -136,3 +136,22 @@
   the last completed run untouched. The superseded sidecar is deleted after the reference
   moves past it, so runs do not accumulate one file each. Verified the regression tests
   fail with a fixed path restored: 4 of 7 do.
+- **A failing reference update was still a way to read a mismatched pair.** `text.json`
+  has a fixed path, so a reprocess replaces it irreversibly; if recording the references
+  then failed, the row went on pointing at the previous run's raw analysis, which would
+  read as though it described the newly published text. The reference cannot be corrected
+  at that point — the store is what just failed — so both raw analyses are removed
+  instead. A reference resolving to nothing is a visible fault; one resolving to the wrong
+  run's analysis is a silent one. Found by writing the test the review asked for, not by
+  reasoning about the code.
+
+## Known limitation, not addressed here
+
+`text.json` is written to a fixed path, so a reprocess overwrites the previous run's text
+irreversibly before anything is published. That is the root cause of the case above, and
+the reason its resolution is "make the mismatch visible" rather than "keep the previous run
+intact". Making `text.json` run-scoped as well would remove the whole class — publication
+would become the single reference update, and a failure anywhere before it would leave the
+previous run wholly intact. It is out of scope here: it changes a requirement already
+merged in the `content-extraction` spec and the shape of the `markdown_url` field in the
+`202` response. Worth a change proposal of its own.

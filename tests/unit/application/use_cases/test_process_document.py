@@ -1077,3 +1077,77 @@ class TestACompletedRunSurvivesAFailedReprocess:
 
         assert store.analysis_blob_ref is None
         assert first_ref not in blobs.blobs
+
+    async def test_a_failing_reference_update_does_not_leave_a_mismatched_pair(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """text.json is written before the reference moves, and its path is fixed.
+
+        So a reference update that fails on a reprocess has already replaced the previous
+        text.json, leaving the row pointing at the previous run's raw analysis. That
+        pairing is exactly what must never be readable.
+        """
+        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
+        first_ref = await self._complete_first_run(
+            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
+        )
+
+        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
+
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-2"),
+                request_,
+            )
+
+        # run-2's text.json is now published, and the reference could not be corrected.
+        assert json.loads(blobs.blobs[text_path])["extracted_text"] == "text from run-2"
+
+        # Whatever the stale reference names must not resolve to another run's analysis.
+        # Resolving to nothing is the accepted outcome here: a dangling reference is a
+        # visible fault, where the wrong run's analysis is a silent one.
+        stale_ref = store.analysis_blob_ref
+        assert stale_ref == first_ref
+        assert stale_ref not in blobs.blobs
+
+    async def test_a_failing_reference_update_leaves_no_reachable_sidecar_at_all(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """Neither run's raw analysis may be left where the stale reference could find it."""
+        await self._complete_first_run(
+            blobs, mock_document_intelligence_adapter, store, sample_markdown_output, request_
+        )
+        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
+
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-2"),
+                request_,
+            )
+
+        remaining = [
+            path
+            for path in blobs.blobs
+            if path.startswith(analysis_prefix(sample_tenant_id, sample_file_id))
+        ]
+        assert remaining == []

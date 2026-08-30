@@ -193,13 +193,25 @@ class ProcessDocumentUseCase:
             # this run produced no sidecar the reference is cleared rather than left
             # alone, so it cannot keep pointing at the previous run's analysis while the
             # text.json beside it says raw_analysis_stored=false.
-            await self._pipeline_store.update_blob_references(
-                tenant_id=request.tenant_id,
-                file_id=request.file_id,
-                text_blob_ref=output_blob_path,
-                analysis_blob_ref=analysis_blob_path,
-                clear_analysis_blob_ref=analysis_blob_path is None,
-            )
+            try:
+                await self._pipeline_store.update_blob_references(
+                    tenant_id=request.tenant_id,
+                    file_id=request.file_id,
+                    text_blob_ref=output_blob_path,
+                    analysis_blob_ref=analysis_blob_path,
+                    clear_analysis_blob_ref=analysis_blob_path is None,
+                )
+            except Exception:
+                # text.json has a fixed path, so it has already replaced the previous
+                # run's — irreversibly. The row, however, still points at the raw analysis
+                # that described the text now gone, which would read as this run's. The
+                # reference cannot be corrected (the store is what just failed), so the
+                # blob it names is removed instead: a reference that resolves to nothing
+                # is a visible fault, where a reference that resolves to the wrong run's
+                # analysis is a silent one.
+                await self._discard_unreferenced_analysis(request, analysis_blob_path)
+                await self._discard_unreferenced_analysis(request, previous_analysis_ref)
+                raise
 
             # The superseded sidecar described the text.json this run just replaced, so
             # nothing can pair with it any more.

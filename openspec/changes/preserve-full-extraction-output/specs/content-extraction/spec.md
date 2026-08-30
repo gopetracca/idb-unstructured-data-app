@@ -46,6 +46,13 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
   discarded because nothing references it, and the original failure is the error that
   surfaces
 
+#### Scenario: The reference cannot be recorded after the text output was replaced
+
+- **WHEN** `text.json` has been stored and recording the blob references then fails
+- **THEN** no raw analysis is left where the un-updated reference could resolve to it, so
+  that reference resolves to nothing rather than to an analysis of a different run, and
+  the failure is reported
+
 #### Scenario: Superseded raw analysis is not kept
 
 - **WHEN** a re-extraction completes and the reference moves to the new raw analysis, or
