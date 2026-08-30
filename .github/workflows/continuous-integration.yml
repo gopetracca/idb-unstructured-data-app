@@ -9,20 +9,34 @@ on:
     branches:
       - develop
       - main
+    # Documentation-only changes do not affect the built artifact, so they do
+    # not run the pipeline. Keep .github/** OUT of this list: a workflow change
+    # must exercise itself. Note that a PR touching only these paths never
+    # reports this check at all — if it is ever made a required status check,
+    # replace this filter with a gate job so docs-only PRs stay mergeable.
     paths-ignore:
       - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
+      - 'openspec/**'
+      - '**.md'
       - '**.txt'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.vscode/**'
+      - '.idea/**'
 
   push:
     branches:
       - 'feature/**'
+    # Same non-code filter as the pull_request trigger above.
     paths-ignore:
       - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
+      - 'openspec/**'
+      - '**.md'
       - '**.txt'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.vscode/**'
+      - '.idea/**'
 
   workflow_dispatch:
 
