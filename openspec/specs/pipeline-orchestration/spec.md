@@ -175,15 +175,40 @@ The system SHALL configure the queue host for bounded concurrency and bounded re
 - **WHEN** the Functions host reads its configuration
 - **THEN** queue messages are base64-encoded, polled at most every 5 seconds, held invisible for 5 minutes, processed in batches of 4, and dequeued at most twice before going to the poison queue
 
-### Requirement: Storage Provisioning At Startup
+### Requirement: Best-Effort Storage Provisioning At Startup
 
-The system SHALL ensure the blob containers and queues the pipeline depends on exist
-before serving traffic.
+The system SHALL attempt to create the blob containers and queues the pipeline depends
+on at startup, and SHALL treat the attempt as best-effort: provisioning is deliberately
+not a precondition for serving traffic, so a failure to create or reach a resource
+degrades the pipeline at request time rather than preventing the application from
+starting.
 
 #### Scenario: Startup initialization
 
 - **WHEN** the application starts
-- **THEN** the raw, text, chunks, and embeddings containers and the pipeline queues are created if absent
+- **THEN** creation is attempted for the raw, text, chunks, and embeddings containers and for the `raw-file`, `raw-to-text`, `text-to-chunks`, `chunk-to-vector`, `ingest-to-db`, and `delete-file` queues
+
+#### Scenario: Provisioning failure does not abort startup
+
+- **WHEN** creating a container or queue fails for any reason — the resource already exists, the credential is unauthorized, or the storage account is unreachable
+- **THEN** the failure is swallowed, startup continues, and the application begins serving traffic
+
+#### Scenario: Success is not distinguished from failure
+
+- **WHEN** a creation call raises
+- **THEN** the outcome is reported as "not created", which is the same outcome reported when the resource already existed
+- **AND** the startup log line stating the resource was ensured is therefore not evidence that it exists
+
+#### Scenario: Missing container surfaces at upload time
+
+- **WHEN** a container does not exist and a document is uploaded
+- **THEN** the blob write fails and the request returns `500` with error `StorageError`
+
+#### Scenario: Missing queue silently strands the document
+
+- **WHEN** a pipeline queue does not exist and a document is uploaded
+- **THEN** the upload still returns `201` because enqueue failures are logged rather than raised, leaving the document persisted in blob storage and SQL but never processed
+- **AND** the document's pipeline state stays at stage `dispatcher` with status `queued`
 
 ### Requirement: Synchronous Stage Endpoints
 
