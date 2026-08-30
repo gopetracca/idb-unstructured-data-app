@@ -55,7 +55,9 @@ document's artifacts form a single removable subtree.
 The system SHALL overwrite artifacts by default and record their content type, so a
 re-run of a stage replaces its output rather than failing or duplicating — except where a
 stage writes run-scoped outputs, which are never overwritten and are instead superseded by
-moving the reference and deleting what it displaced.
+moving the reference that locates them. Deleting what a reference displaced is best-effort
+cleanup, not a guarantee: correctness rests on the reference, and deletion of the
+now-unreachable blob is an attempt to reclaim storage.
 
 #### Scenario: Re-running a stage
 
@@ -67,10 +69,20 @@ moving the reference and deleting what it displaced.
 - **WHEN** the extraction stage runs again for a document that already has stored outputs
 - **THEN** it writes to paths unique to the new run, so nothing previously published is overwritten and the document reads as the last completed run left it until the new references are published
 
-#### Scenario: Superseded run-scoped artifacts are removed
+#### Scenario: Superseded run-scoped artifacts are cleaned up
 
 - **WHEN** new references are published for a document
-- **THEN** the artifacts the references previously pointed at are deleted, so unreferenced outputs do not accumulate
+- **THEN** deletion of the artifacts the references previously pointed at is attempted, so unreferenced outputs do not ordinarily accumulate
+
+#### Scenario: Cleanup of a superseded artifact fails
+
+- **WHEN** deleting a displaced or abandoned artifact raises
+- **THEN** the failure is logged as a warning and the stage's outcome is unchanged, because the blob is already unreachable — the reference, not the path, is what locates content — so the cost is leaked storage rather than exposure or an inconsistent read
+
+#### Scenario: Leaked artifacts are reclaimed on document deletion
+
+- **WHEN** a document is deleted after one or more cleanup attempts failed
+- **THEN** the prefix sweep removes the leaked artifacts along with the rest of the document's subtree, so a failed cleanup is bounded by the document's lifetime rather than permanent
 
 #### Scenario: Content type recorded
 

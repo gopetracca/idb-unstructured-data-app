@@ -176,20 +176,29 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
 - **WHEN** the raw analysis has been written and the subsequent text-output write fails
 - **THEN** the last completed extraction is unchanged — its text output, its raw analysis
   and its blob references all still describe each other — the failed run's raw analysis is
-  discarded because nothing references it, and the original failure is the error that
-  surfaces
+  cleaned up on a best-effort basis because nothing references it, and the original failure
+  is the error that surfaces
 
 #### Scenario: Recording the references fails
 
 - **WHEN** both outputs have been stored and recording the blob references then fails
 - **THEN** the last completed extraction is still published and still matched, this run's
-  outputs are discarded because nothing references them, and the failure is reported
+  outputs are cleaned up on a best-effort basis because nothing references them, and the
+  failure is reported
 
-#### Scenario: Superseded outputs are not kept
+#### Scenario: Superseded outputs are cleaned up
 
 - **WHEN** a re-extraction completes and the references move to its outputs
-- **THEN** the text output and raw analysis the references pointed at before are deleted,
-  since nothing can reach them any more
+- **THEN** deletion of the text output and raw analysis the references pointed at before is
+  attempted, since nothing can reach them any more
+
+#### Scenario: Cleaning up a superseded or abandoned output fails
+
+- **WHEN** deleting an output that nothing references raises
+- **THEN** the failure is logged as a warning and neither the extraction result nor the
+  published references change, because the blob is already unreachable — deleting it
+  reclaims storage rather than protecting a reader — and a document deletion later sweeps
+  it by prefix
 
 #### Scenario: Document extracted before this capability existed
 
