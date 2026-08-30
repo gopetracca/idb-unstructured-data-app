@@ -34,57 +34,75 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure Login
-        uses: dx-developer-platform/github-wf-core-azure-login-action@v1
-        with:
-          environment: ${{ inputs.environment }}
-          client-id: ${{ vars.CLIENT_ID }}
-          client-id-prd: ${{ vars.CLIENT_ID_PRD }}
-          client-id-stg: ${{ vars.CLIENT_ID_STG }}
-          client-id-tst: ${{ vars.CLIENT_ID_TST }}
-          client-id-qa: ${{ vars.CLIENT_ID_QA }}
-          client-id-dev: ${{ vars.CLIENT_ID_DEV }}
-          client-secret: ${{ secrets.CLIENT_SECRET }}
-          subscription-id: ${{ vars.SUBSCRIPTION_ID }}
-          tenant-id: ${{ vars.TENANT_ID }}
+      - name: IDB-only pipeline disabled
+        run: |
+          echo "::error::This job depends on IDB Azure infrastructure (the private"
+          echo "::error::dx-developer-platform login action, the acrnpdaimvpshared"
+          echo "::error::registry, and the IDB subscription). Its steps are commented"
+          echo "::error::out below. Restore them when running inside the IDB org."
+          exit 1
+
+      # [IDB-ONLY] Private org action — unresolvable outside the IDB organization.
+      # - name: Azure Login
+      #   uses: dx-developer-platform/github-wf-core-azure-login-action@v1
+      #   with:
+      #     environment: ${{ inputs.environment }}
+      #     client-id: ${{ vars.CLIENT_ID }}
+      #     client-id-prd: ${{ vars.CLIENT_ID_PRD }}
+      #     client-id-stg: ${{ vars.CLIENT_ID_STG }}
+      #     client-id-tst: ${{ vars.CLIENT_ID_TST }}
+      #     client-id-qa: ${{ vars.CLIENT_ID_QA }}
+      #     client-id-dev: ${{ vars.CLIENT_ID_DEV }}
+      #     client-secret: ${{ secrets.CLIENT_SECRET }}
+      #     subscription-id: ${{ vars.SUBSCRIPTION_ID }}
+      #     tenant-id: ${{ vars.TENANT_ID }}
 
       # Apply alembic migrations via a one-shot Container Apps Job (same image,
       # runs inside the environment network with its own DB credentials) and
       # only continue to the revision deploy when it succeeds. Skipped until
       # the MIGRATIONS_JOB_NAME environment variable is configured — see
       # docs/AIA-394-database-migrations.md for the one-time provisioning.
-      - name: Run database migrations
-        if: ${{ vars.MIGRATIONS_JOB_NAME != '' }}
-        shell: bash
-        env:
-          MIGRATIONS_JOB_NAME: ${{ vars.MIGRATIONS_JOB_NAME }}
-          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
-          ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
-          IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
-          IMAGE_TAG: ${{ inputs.image-tag }}
-        run: |
-          chmod +x scripts/run_migrations_job.sh
-          scripts/run_migrations_job.sh \
-            --job "$MIGRATIONS_JOB_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --acr "$ACR_NAME" \
-            --image "$IMAGE_NAME" \
-            --tag "$IMAGE_TAG"
-
-      - name: Deploy Container App revision
-        shell: bash
-        env:
-          CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
-          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
-          ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
-          IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
-          IMAGE_TAG: ${{ inputs.image-tag }}
-        run: |
-          chmod +x scripts/deploy_container_app.sh
-          scripts/deploy_container_app.sh \
-            --app "$CONTAINER_APP_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --acr "$ACR_NAME" \
-            --image "$IMAGE_NAME" \
-            --tag "$IMAGE_TAG" \
-            --configure-probes
+      # [IDB-ONLY] Both steps below run against IDB Azure resources (the
+      # migrations Container Apps Job and the target Container App) using the
+      # Azure login commented out above. Restore them together.
+      #
+      # Apply alembic migrations via a one-shot Container Apps Job (same image,
+      # runs inside the environment network with its own DB credentials) and
+      # only continue to the revision deploy when it succeeds. Skipped until
+      # the MIGRATIONS_JOB_NAME environment variable is configured — see
+      # docs/AIA-394-database-migrations.md for the one-time provisioning.
+      # - name: Run database migrations
+      #   if: ${{ vars.MIGRATIONS_JOB_NAME != '' }}
+      #   shell: bash
+      #   env:
+      #     MIGRATIONS_JOB_NAME: ${{ vars.MIGRATIONS_JOB_NAME }}
+      #     RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      #     ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
+      #     IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
+      #     IMAGE_TAG: ${{ inputs.image-tag }}
+      #   run: |
+      #     chmod +x scripts/run_migrations_job.sh
+      #     scripts/run_migrations_job.sh \
+      #       --job "$MIGRATIONS_JOB_NAME" \
+      #       --resource-group "$RESOURCE_GROUP" \
+      #       --acr "$ACR_NAME" \
+      #       --image "$IMAGE_NAME" \
+      #       --tag "$IMAGE_TAG"
+      #
+      # - name: Deploy Container App revision
+      #   shell: bash
+      #   env:
+      #     CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+      #     RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+      #     ACR_NAME: ${{ vars.ACR_NAME || inputs.acr-name }}
+      #     IMAGE_NAME: ${{ vars.IMAGE_NAME || inputs.image-name }}
+      #     IMAGE_TAG: ${{ inputs.image-tag }}
+      #   run: |
+      #     chmod +x scripts/deploy_container_app.sh
+      #     scripts/deploy_container_app.sh \
+      #       --app "$CONTAINER_APP_NAME" \
+      #       --resource-group "$RESOURCE_GROUP" \
+      #       --acr "$ACR_NAME" \
+      #       --image "$IMAGE_NAME" \
+      #       --tag "$IMAGE_TAG" \
+      #       --configure-probes

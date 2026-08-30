@@ -1,0 +1,50 @@
+schema: spec-driven
+
+context: |
+  EA Unstructured Data API — an Azure-hosted RAG ingestion and retrieval API for IDB.
+
+  Tech stack: Python 3.12, FastAPI served through Azure Functions (AsgiFunctionApp),
+  Azure Storage queues + blobs, Azure Document Intelligence, Azure OpenAI embeddings,
+  Azure AI Search (vector + BM25 + semantic reranker), SQL Server via SQLAlchemy async +
+  Alembic, dependency-injector for wiring, Datadog (ddtrace) for tracing, uv for
+  dependency management, pytest for tests. Deployed as a container to Azure Container
+  Apps; migrations run as a gated pre-deploy Container Apps Job.
+
+  Architecture: strict hexagonal / clean layering under src/ —
+    core/          domain entities, value objects, errors, index schema registry
+    application/   use cases, DTOs, and ports (interfaces)
+    infrastructure/ adapters implementing ports (azure/, sqlserver/, chonkie/, llamaindex/)
+    presentation/  http/ (routes, schemas, auth, middleware) and queue/ (triggers)
+  Dependencies point inward only. Adapters are swapped via settings flags
+  (*_USE_FAKE) for local development and tests.
+
+  Domain: documents are uploaded, text-extracted, chunked, vectorized, and ingested into
+  a vector collection through a queue-driven pipeline (raw-file -> raw-to-text ->
+  text-to-chunks -> chunk-to-vector -> ingest-to-db). Documents belong to a
+  document_category (operational or publication) that selects both the typed metadata
+  model and the search index schema. The API is currently single-tenant: the effective
+  tenant is resolved server-side and never accepted from the client.
+
+  Conventions:
+  - Conventional commits; branches named feature/{JIRA-KEY}-slug; Jira keys look like AIA-###.
+  - Cite the Jira key in commit subjects and in code comments that explain a
+    non-obvious security or reliability decision (the codebase already does this).
+  - Authorization uses four permissions: Search, documents.read, documents.write, admin.
+    Each has an App Role twin suffixed .All. There is deliberately no scope implication.
+  - Domain errors live in src/core/errors.py and are mapped to HTTP status codes in
+    src/presentation/http/exception_handlers.py — add new errors in both places.
+  - Blob references in SQL are the source of truth for content location; never
+    reconstruct blob paths by convention.
+  - Tests mirror src/ under tests/unit/ and tests/integration/.
+
+rules:
+  spec:
+    - Write requirements against observable API and pipeline behaviour, not internal
+      class or function names.
+    - Every requirement needs at least one scenario, including the failure path and the
+      HTTP status code or pipeline state it produces.
+    - Name the setting that governs behaviour (e.g. ENTRA_ID_ENABLED, SQL_SERVER_ENABLED)
+      when a requirement is configuration-dependent.
+  tasks:
+    - Include a task for the unit tests under tests/unit/ mirroring the changed module.
+    - Include a task for updating docs/ when the change alters the public API surface.

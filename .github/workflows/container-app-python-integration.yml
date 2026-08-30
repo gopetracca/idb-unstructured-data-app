@@ -12,9 +12,12 @@ on:
         description: Command passed to 'uv run' (e.g. "pytest -m unit --no-cov")
         type: string
         default: 'pytest -m unit --no-cov'
-    secrets:
-      SONAR_TOKEN:
-        required: true
+    # [IDB-ONLY] SONAR_TOKEN feeds the dx-developer-platform SonarQube action
+    # commented out below. Declaring it required would break every caller that
+    # can no longer supply it. Restore together with the scan step.
+    # secrets:
+    #   SONAR_TOKEN:
+    #     required: true
 
   workflow_dispatch:
     inputs:
@@ -31,7 +34,9 @@ jobs:
   python-ci:
     name: Python Continuous Integration
     runs-on: ubuntu-latest
-    environment: continuous-integration
+    # [IDB-ONLY] The 'continuous-integration' GitHub Environment exists to hold
+    # PROJECT_KEY / PROJECT_NAME for the SonarQube scan. Restore with that step.
+    # environment: continuous-integration
 
     steps:
     - name: Checkout Code
@@ -51,12 +56,15 @@ jobs:
     - name: Run unit tests
       run: uv run ${{ inputs.test-command }}
     
-    - name: Run SonarQube Scan
-      uses: dx-developer-platform/github-wf-core-sonarqube-action/scan-generic@v1
-      with:
-        sonar-token: ${{ secrets.SONAR_TOKEN }}
-        sonar-project-key: ${{ vars.PROJECT_KEY }}
-        sonar-project-name: ${{ vars.PROJECT_NAME }}
+    # [IDB-ONLY] Requires the private dx-developer-platform org action; outside
+    # the IDB organization the workflow fails at action resolution before any
+    # step runs. Restore when this repository lives in that organization.
+    # - name: Run SonarQube Scan
+    #   uses: dx-developer-platform/github-wf-core-sonarqube-action/scan-generic@v1
+    #   with:
+    #     sonar-token: ${{ secrets.SONAR_TOKEN }}
+    #     sonar-project-key: ${{ vars.PROJECT_KEY }}
+    #     sonar-project-name: ${{ vars.PROJECT_NAME }}
 
   docker-build:
     needs: python-ci

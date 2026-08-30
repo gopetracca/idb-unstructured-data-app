@@ -29,5 +29,6 @@ on:
 jobs:
   continuous-integration:
     uses: ./.github/workflows/container-app-python-integration.yml
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    # [IDB-ONLY] Restore alongside the SonarQube scan step in the called workflow.
+    # secrets:
+    #   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
