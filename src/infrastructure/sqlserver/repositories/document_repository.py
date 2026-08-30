@@ -7,11 +7,12 @@ Backed by three SQL tables: files, pipeline_state, file_metadata.
 import logging
 
 import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.dto.file_index_filters import FileIndexFilters
 from src.core.entities.composites import DocumentComplete, DocumentWithPipeline
-from src.core.entities.document import Document, ReplacedBlobReferences
+from src.core.entities.document import ReplacedBlobReferences
 from src.core.entities.pipeline_state import OverallStatus, PipelineState, ProcessingStage
 from src.core.value_objects.document_metadata import DocumentMetadata
 from src.infrastructure.sqlserver.models.file_metadata_model import FileMetadataTable
@@ -303,6 +304,36 @@ class DocumentRepositorySQLServer:
             await session.commit()
             return entity
 
+    # One statement does the swap: it reports the row's values from before the write and
+    # applies the new ones under a single row lock. A SELECT followed by an UPDATE cannot
+    # do this on SQL Server — SQLAlchemy's `with_for_update()` renders no locking clause at
+    # all on this dialect, so two concurrent publishes would each read the same previous
+    # references and both clean up the same outputs, orphaning whichever pair was
+    # published first.
+    _UPDATE_BLOB_REFS = sa.text(
+        """
+        UPDATE files WITH (ROWLOCK)
+        SET raw_blob_ref = COALESCE(:raw_blob_ref, raw_blob_ref),
+            text_blob_ref = COALESCE(:text_blob_ref, text_blob_ref),
+            analysis_blob_ref = CASE
+                WHEN :analysis_blob_ref IS NOT NULL THEN :analysis_blob_ref
+                WHEN :clear_analysis_blob_ref = 1 THEN NULL
+                ELSE analysis_blob_ref
+            END
+        OUTPUT deleted.text_blob_ref, deleted.analysis_blob_ref
+        WHERE tenant_id = :tenant_id AND file_id = :file_id
+        """
+    )
+
+    # SQL Server stamps a system-versioned row's period start with the *transaction's*
+    # start time, not the commit time. So a transaction that began before another one
+    # committed cannot then modify the row that other transaction stamped: SQL Server
+    # rejects it with error 13535 rather than writing history out of order. Two overlapping
+    # extractions publishing within the same moment hit exactly that. Retrying in a fresh
+    # transaction resolves it, because the retry starts after the winning stamp.
+    _TEMPORAL_CLOCK_SKEW_ERROR = "13535"
+    _PUBLISH_ATTEMPTS = 4
+
     async def update_blob_references(
         self,
         tenant_id: str,
@@ -314,38 +345,55 @@ class DocumentRepositorySQLServer:
     ) -> ReplacedBlobReferences:
         """Update blob storage references for a file (on the files table).
 
-        Returns what this update displaced, read inside the same transaction as the write
-        so it reflects the row this update actually replaced rather than whatever a caller
-        happened to read earlier.
+        A `None` reference means "leave it alone", so one stage cannot wipe a path another
+        stage owns; clearing the raw-analysis path is therefore explicit.
+
+        Returns the references this statement displaced, taken from `OUTPUT deleted.*` so
+        they are the values the write actually replaced. The caller deletes the outputs it
+        superseded, which is only correct if no other publish can slip between reading the
+        old values and writing the new ones — hence a single statement rather than a SELECT
+        followed by an UPDATE. (`with_for_update()` would not do: SQLAlchemy's MSSQL
+        dialect renders no locking clause at all.)
         """
-        async with self._session_factory() as session:
-            stmt = (
-                sa.select(FileTable)
-                .where(FileTable.tenant_id == tenant_id, FileTable.file_id == file_id)
-                .with_for_update()
-            )
-            result = await session.execute(stmt)
-            row = result.scalar_one_or_none()
+        params = {
+            "raw_blob_ref": raw_blob_ref,
+            "text_blob_ref": text_blob_ref,
+            "analysis_blob_ref": analysis_blob_ref,
+            "clear_analysis_blob_ref": 1 if clear_analysis_blob_ref else 0,
+            "tenant_id": tenant_id,
+            "file_id": file_id,
+        }
+
+        for attempt in range(1, self._PUBLISH_ATTEMPTS + 1):
+            try:
+                async with self._session_factory() as session:
+                    result = await session.execute(self._UPDATE_BLOB_REFS, params)
+                    row = result.fetchone()
+                    await session.commit()
+            except DBAPIError as exc:
+                if (
+                    self._TEMPORAL_CLOCK_SKEW_ERROR not in str(exc.orig)
+                    or attempt == self._PUBLISH_ATTEMPTS
+                ):
+                    raise
+                logger.warning(
+                    "Blob reference update lost a race on the temporal table, retrying "
+                    "(attempt %d): tenant=%s, file=%s",
+                    attempt,
+                    tenant_id,
+                    file_id,
+                )
+                continue
+
             if row is None:
                 return ReplacedBlobReferences()
-
-            replaced = ReplacedBlobReferences(
+            return ReplacedBlobReferences(
                 text_blob_ref=row.text_blob_ref,
                 analysis_blob_ref=row.analysis_blob_ref,
             )
 
-            if raw_blob_ref is not None:
-                row.raw_blob_ref = raw_blob_ref
-            if text_blob_ref is not None:
-                row.text_blob_ref = text_blob_ref
-            if analysis_blob_ref is not None:
-                row.analysis_blob_ref = analysis_blob_ref
-            elif clear_analysis_blob_ref:
-                # A re-run that stored no sidecar must not leave the row pointing at the
-                # previous run's analysis, which no longer describes this run's text.
-                row.analysis_blob_ref = None
-            await session.commit()
-            return replaced
+        # Unreachable: the loop either returns or re-raises on the final attempt.
+        return ReplacedBlobReferences()
 
     async def query_by_status(
         self,

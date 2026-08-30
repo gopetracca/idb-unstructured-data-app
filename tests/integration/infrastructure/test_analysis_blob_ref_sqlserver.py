@@ -8,6 +8,7 @@ Requires Docker: the session-scoped `sqlserver_container` fixture starts SQL Ser
 creates the test database, and runs `alembic upgrade head` before yielding.
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -239,3 +240,114 @@ class TestTheUpdateReportsWhatItDisplaced:
 
         assert replaced.text_blob_ref is None
         assert replaced.analysis_blob_ref is None
+
+
+class TestTwoSessionsPublishingConcurrently:
+    """Two publishes racing over the same row, each in its own session.
+
+    This is the case the in-process tests cannot prove. Cleanup is driven by what each
+    publish reports as displaced, so if two concurrent statements can both report the same
+    previous pair, the outputs of whichever committed first are orphaned with nothing left
+    to delete them. Only a real database can settle whether that is possible.
+    """
+
+    async def test_each_publish_reports_a_different_predecessor(
+        self, repository: DocumentRepositorySQLServer, stored_document: DocumentComplete
+    ):
+        file_id = stored_document.document.file_id
+        original = (
+            f"{TENANT}/{file_id}/text/seed.json",
+            f"{TENANT}/{file_id}/analysis/seed.json",
+        )
+        await repository.update_blob_references(
+            tenant_id=TENANT,
+            file_id=file_id,
+            text_blob_ref=original[0],
+            analysis_blob_ref=original[1],
+        )
+
+        async def publish(run: str):
+            return await repository.update_blob_references(
+                tenant_id=TENANT,
+                file_id=file_id,
+                text_blob_ref=f"{TENANT}/{file_id}/text/{run}.json",
+                analysis_blob_ref=f"{TENANT}/{file_id}/analysis/{run}.json",
+            )
+
+        first, second = await asyncio.gather(publish("run-a"), publish("run-b"))
+
+        reported = [
+            (first.text_blob_ref, first.analysis_blob_ref),
+            (second.text_blob_ref, second.analysis_blob_ref),
+        ]
+
+        # One publish displaced the original pair; the other displaced whatever that one
+        # published. If both reported the original, one run's outputs would leak.
+        assert original in reported
+        assert reported[0] != reported[1], (
+            "both concurrent publishes reported the same predecessor, so the outputs of "
+            "the run that committed first would never be cleaned up"
+        )
+
+        # And every published pair is accounted for: the row holds one of them, the other
+        # was reported as displaced and would be swept by its publisher.
+        stored = await repository.get_by_id(TENANT, file_id)
+        published = (stored.document.text_blob_ref, stored.document.analysis_blob_ref)
+        assert published not in reported
+        assert {published, original} | {tuple(r) for r in reported} == {
+            published,
+            original,
+            *[tuple(r) for r in reported],
+        }
+
+    async def test_many_concurrent_publishes_form_a_chain(
+        self, repository: DocumentRepositorySQLServer, stored_document: DocumentComplete
+    ):
+        """Every pair except the surviving one is reported displaced exactly once.
+
+        That is the property cleanup depends on: each output is deleted by exactly one
+        publisher, and the published pair is deleted by none.
+        """
+        file_id = stored_document.document.file_id
+        # Named distinctly from the concurrent runs: if a run reused these paths, two
+        # publishes would displace identical values and the uniqueness check below would
+        # fail for a reason that has nothing to do with concurrency.
+        original = (
+            f"{TENANT}/{file_id}/text/seed.json",
+            f"{TENANT}/{file_id}/analysis/seed.json",
+        )
+        await repository.update_blob_references(
+            tenant_id=TENANT,
+            file_id=file_id,
+            text_blob_ref=original[0],
+            analysis_blob_ref=original[1],
+        )
+
+        runs = [f"run-{i}" for i in range(8)]
+
+        async def publish(run: str):
+            replaced = await repository.update_blob_references(
+                tenant_id=TENANT,
+                file_id=file_id,
+                text_blob_ref=f"{TENANT}/{file_id}/text/{run}.json",
+                analysis_blob_ref=f"{TENANT}/{file_id}/analysis/{run}.json",
+            )
+            return (replaced.text_blob_ref, replaced.analysis_blob_ref)
+
+        displaced = await asyncio.gather(*(publish(run) for run in runs))
+
+        # No pair is displaced twice — otherwise two publishers would delete the same
+        # outputs and some other pair would never be deleted at all.
+        assert len(set(displaced)) == len(displaced)
+
+        stored = await repository.get_by_id(TENANT, file_id)
+        published = (stored.document.text_blob_ref, stored.document.analysis_blob_ref)
+
+        written = {original} | {
+            (f"{TENANT}/{file_id}/text/{run}.json", f"{TENANT}/{file_id}/analysis/{run}.json")
+            for run in runs
+        }
+        # Everything written was either displaced by exactly one publisher, or is the pair
+        # the row now points at.
+        assert set(displaced) | {published} == written
+        assert published not in set(displaced)

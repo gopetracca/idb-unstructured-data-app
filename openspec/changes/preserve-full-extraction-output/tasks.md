@@ -180,3 +180,27 @@ the `202` response. Both are captured in the `content-extraction` delta and `doc
   Server tests pin the returned values for a first write, a replacement, a clear, and an
   unknown document. Verified the unit test catches the leak — restoring the
   observed-at-start sweep makes it fail with the losing run's text blob left behind.
+
+## Follow-up from review (sixth pass)
+
+- **The lock I claimed did not exist.** `update_blob_references` read the previous
+  references and then wrote the new ones, relying on `with_for_update()` to hold the row.
+  SQLAlchemy's MSSQL dialect renders that as *no locking clause at all* — verified by
+  compiling the statement against the dialect — so two concurrent publishes could still
+  both report the same predecessor, and the pair published first would be orphaned.
+  Replaced with a single `UPDATE ... OUTPUT deleted.text_blob_ref, deleted.analysis_blob_ref`
+  statement: the swap and the report of what it displaced are one operation under one row
+  lock, and `COALESCE`/`CASE` preserve the "None leaves it alone, clearing is explicit"
+  semantics.
+- **A temporal-table failure the concurrency test exposed.** `files` is system-versioned,
+  and SQL Server stamps a row's period start with the *transaction's* start time. A
+  transaction that began before another committed cannot then modify the row that one
+  stamped — it fails with error 13535 rather than writing history out of order. Two
+  overlapping publishes hit this. It would have failed the `convert` stage in production
+  under ordinary concurrency, so the publish now retries in a fresh transaction, which
+  starts after the winning stamp. Found by running the test, not by reading the code.
+- **Two-session integration tests** against real SQL Server: two concurrent publishes must
+  report *different* predecessors, and eight concurrent publishes must form a chain in
+  which every pair written is displaced by exactly one publisher except the one the row
+  ends up naming. Verified they discriminate — restoring the read-then-write makes the
+  eight-way test fail.
