@@ -422,6 +422,7 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
                     column_span=getattr(cell, "column_span", None) or 1,
                     kind=_enum_value(getattr(cell, "kind", None)) or "content",
                     content=cell.content or "",
+                    elements=list(getattr(cell, "elements", None) or []),
                     spans=_map_spans(getattr(cell, "spans", None)),
                     bounding_regions=_map_regions(getattr(cell, "bounding_regions", None)),
                 )

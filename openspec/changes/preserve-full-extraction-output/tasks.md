@@ -228,6 +228,9 @@ RAW SIDECAR keys: ['apiVersion', 'content', 'contentFormat', 'modelId', 'pages',
 raw bytes: 8756 | text.json bytes: 9555
 ```
 
+Re-run after adding `TableCell.elements` (below): 14 passed, and the sidecar's only
+remaining unmodelled key is `stringIndexType`, a request-level knob rather than content.
+
 Three things worth recording from it:
 
 - **The premise of this change is visible in the output.** The markdown the service returns
@@ -239,3 +242,13 @@ Three things worth recording from it:
 - **The size claim in the proposal was wrong** and has been corrected. The sidecar was
   *smaller* than `text.json` here (8.8 KB vs 9.6 KB), because the typed projection restates
   per-page words and lines that the raw response holds once.
+
+- **`TableCell.elements` was missing, found by reading real output.** The service returns
+  `"elements": ["/paragraphs/2"]` on a cell — the link back to the paragraphs its content
+  came from. The typed model did not declare it, so it lived only in the sidecar. Added and
+  mapped; `ExtractedFigure` and `DocumentSection` already carried the same field.
+- **`scripts/show_extraction_output.py`** analyses a document and prints what the stage
+  keeps before and after this change, with `--dump-to` to write `text.json`, its pre-change
+  equivalent, and the raw analysis for inspection. On the bundled sample: 767 bytes kept
+  before, 9,781 after. How to run it, and the three test suites, are documented in
+  `docs/04-api-and-interfaces.md`.

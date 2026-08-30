@@ -1078,6 +1078,44 @@ re-analysing the document, which is the most expensive operation in the pipeline
   document shape rather than to hold. The structural fields in `text.json` are not gated by
   this setting.
 
+#### Inspecting extraction output yourself
+
+`scripts/show_extraction_output.py` analyses one document and prints what the stage keeps,
+before and after structural preservation, so the difference can be inspected on a real
+document rather than taken on faith:
+
+```bash
+# Bundled sample: a one-page PDF with a merged-header table
+uv run python scripts/show_extraction_output.py
+
+# Your own document
+uv run python scripts/show_extraction_output.py path/to/document.pdf
+
+# Also write text.json, its pre-change equivalent, and the raw analysis for inspection
+uv run python scripts/show_extraction_output.py --dump-to ./extraction-output
+```
+
+It needs `DOCUMENT_INTELLIGENCE_ENDPOINT` (and `DOCUMENT_INTELLIGENCE_API_KEY` unless the
+resource is reached through managed identity), and bills one analysis per run.
+
+The tests that exercise the same path:
+
+```bash
+# Offline: mapping, table reconstruction, backward compatibility, sidecar behaviour
+uv run pytest -m unit
+
+# Against the real service (billed; one analysis for the whole module)
+DOCUMENT_INTELLIGENCE_RUN_TESTS=on \
+  uv run pytest -m requires_azure_di \
+  tests/integration/infrastructure/test_document_intelligence_live.py
+
+# Against a real SQL Server, started automatically via testcontainers (needs Docker)
+uv run pytest tests/integration/infrastructure/test_analysis_blob_ref_sqlserver.py
+```
+
+The live tests skip themselves when no endpoint is configured, so they are safe to leave in
+a normal run.
+
 A failed raw-analysis write does not fail extraction: the response is still `202`, and the
 loss is visible afterwards as `raw_analysis_stored: false` with a null
 `analysis_blob_ref`. A null `analysis_blob_ref` also means "extracted before the raw

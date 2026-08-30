@@ -99,6 +99,7 @@ TABLE_PAYLOAD = {
                     "columnSpan": 2,
                     "kind": "columnHeader",
                     "content": "Budget Summary",
+                    "elements": ["/paragraphs/2"],
                     "spans": [{"offset": 2, "length": 14}],
                     "boundingRegions": [
                         {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}
@@ -453,6 +454,8 @@ class TestStructuralPreservation:
         assert merged.spans[0].length == 14
         assert merged.bounding_regions[0].page_number == 1
         assert len(merged.bounding_regions[0].polygon) == 8
+        # The service links a cell back to the paragraphs it came from.
+        assert merged.elements == ["/paragraphs/2"]
 
     async def test_table_can_be_reconstructed_without_the_markdown(
         self, output, sample_file_id

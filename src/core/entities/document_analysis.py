@@ -87,6 +87,10 @@ class TableCell(BaseModel):
         description="'content', 'columnHeader', 'rowHeader', 'stubHead' or 'description'",
     )
     content: str = Field(default="", description="Cell text")
+    elements: list[str] = Field(
+        default_factory=list,
+        description="References to the elements the cell's content came from",
+    )
     spans: list[TextSpan] = Field(default_factory=list)
     bounding_regions: list[BoundingRegion] = Field(default_factory=list)
 
