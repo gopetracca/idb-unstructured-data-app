@@ -44,3 +44,23 @@ effective tenant identifier, so tenant data remains separable end to end.
 
 - **WHEN** a document is fetched, listed, updated, or deleted
 - **THEN** the query is scoped by the effective tenant, and a document belonging to another tenant is reported as not found
+
+### Requirement: No Client-Supplied Tenant In The API Contract
+
+The system SHALL keep the tenant out of the public request contract entirely, enforced
+by guard tests over the generated OpenAPI document rather than by convention.
+
+#### Scenario: No tenant parameter
+
+- **WHEN** the mounted operations are enumerated
+- **THEN** no operation declares a header or query parameter whose name contains `tenant`
+
+#### Scenario: No tenant in request bodies
+
+- **WHEN** the request-body schemas are enumerated
+- **THEN** none exposes a `tenant_id` property
+
+#### Scenario: Responses may still carry the tenant
+
+- **WHEN** a response schema is inspected
+- **THEN** it may include `tenant_id`, because the invariant concerns untrusted input, not output

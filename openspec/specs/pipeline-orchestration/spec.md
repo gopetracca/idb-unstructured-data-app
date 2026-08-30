@@ -219,3 +219,14 @@ so a stage can be re-run or driven manually.
 
 - **WHEN** `POST /api/v1/contents`, `POST /api/v1/chunks`, or `POST /api/v1/embeddings` is called with `documents.write`
 - **THEN** that stage runs for the named document and returns `202` with its result, independently of the queue chain
+
+### Requirement: Provisioned Queues Without Consumers
+
+The system SHALL provision the queues named in configuration even where no consumer is
+registered, and the absence of a consumer SHALL be treated as a known state rather than
+an implied one.
+
+#### Scenario: delete-file queue
+
+- **WHEN** the configured queues are provisioned at startup
+- **THEN** `delete-file` is created alongside the rest, but no queue trigger consumes it — deletion is performed synchronously by the delete endpoint, so a message published there would never be processed

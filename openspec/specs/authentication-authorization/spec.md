@@ -219,3 +219,47 @@ across environments.
 
 - **WHEN** `ENTRA_ID_ENABLED` is false and any protected endpoint is called
 - **THEN** the request resolves to user `anonymous` with all four permissions granted and no token is required
+
+### Requirement: Route Security Contract
+
+The system SHALL require authentication on every mounted operation except an explicit
+allowlist of unauthenticated probes, and SHALL declare exactly one permission per
+operation according to the four-permission model. Both invariants are enforced by guard
+tests against the generated OpenAPI document and the mounted route table, so a new route
+cannot ship unprotected or with drifted authorization.
+
+#### Scenario: Unauthenticated allowlist
+
+- **WHEN** the mounted operations are enumerated
+- **THEN** only `GET /`, `GET /health/live`, and `GET /health/ready` are reachable without authentication
+
+#### Scenario: New route without a security requirement
+
+- **WHEN** an operation outside the allowlist declares no security requirement
+- **THEN** the guard test fails naming the offending method and path
+
+#### Scenario: Stale allowlist entry
+
+- **WHEN** an allowlisted path is no longer mounted
+- **THEN** the guard test fails, so the allowlist cannot outlive the route it excused
+
+#### Scenario: Scope drift
+
+- **WHEN** an operation's declared permission differs from the expected mapping
+- **THEN** the guard test fails, so adding, removing, or re-scoping a route is a deliberate change to the mapping
+
+### Requirement: Startup Guard Arming Depends On ENVIRONMENT
+
+The system SHALL derive whether the fail-closed authentication guard fires from the
+`ENVIRONMENT` setting, which defaults to a development value — so the guard is inert
+unless the environment is set explicitly per deployment.
+
+#### Scenario: ENVIRONMENT unset
+
+- **WHEN** `ENVIRONMENT` is not configured
+- **THEN** it defaults to `dev`, the environment is treated as development, and the guard does not fire even with `ENTRA_ID_ENABLED` false
+
+#### Scenario: ENVIRONMENT set to a deployed value
+
+- **WHEN** `ENVIRONMENT` is set to a non-development value such as `test` or `prod`
+- **THEN** the guard is armed and refuses to start with authentication disabled

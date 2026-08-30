@@ -274,3 +274,43 @@ detail on unexpected errors.
 
 - **WHEN** any other exception escapes
 - **THEN** it is logged with the correlation id and the response is a generic `500`
+
+### Requirement: Filter Expression Translation
+
+The system SHALL translate validated filters into a backend filter expression with
+per-field semantics, combining independent filters with AND.
+
+#### Scenario: Single-quote escaping
+
+- **WHEN** a filter value contains a single quote
+- **THEN** it is doubled before interpolation, so a value cannot terminate the literal and alter the filter expression
+
+#### Scenario: Multi-value fields are OR
+
+- **WHEN** `country` or `sector` is supplied as a list
+- **THEN** the values are combined with OR, matching a document in any of them
+
+#### Scenario: Tags are AND
+
+- **WHEN** `tags` is supplied as a list
+- **THEN** the values are combined with AND, matching only documents carrying every listed tag
+
+#### Scenario: Author is a partial match
+
+- **WHEN** `document_author` is supplied
+- **THEN** it is matched as a full-text partial match rather than an exact equality
+
+#### Scenario: File extension normalisation
+
+- **WHEN** `file_extension` is supplied without a leading dot
+- **THEN** a dot is prepended before matching
+
+#### Scenario: Year and date ranges
+
+- **WHEN** `year_min`, `year_max`, `document_publish_date_from`, or `document_publish_date_to` are supplied
+- **THEN** they become inclusive lower and upper bounds on the corresponding field
+
+#### Scenario: No filters
+
+- **WHEN** every supplied filter was pruned as empty
+- **THEN** no filter expression is sent to the backend

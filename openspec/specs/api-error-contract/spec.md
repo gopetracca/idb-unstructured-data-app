@@ -3,8 +3,9 @@
 ## Purpose
 
 Give every API consumer one predictable error shape and a stable mapping from domain
-errors to HTTP status codes, so integrators can branch on `error` rather than parse
-messages. Also covers request-size rejection and correlation identifiers.
+errors to HTTP status codes, so integrators can branch on the `error` type rather than
+parse messages. Request-size rejection lives in `edge-protection`; correlation
+identifiers live in `observability`.
 
 ## Requirements
 
@@ -72,45 +73,3 @@ endpoint.
 
 - **WHEN** a Pydantic validation error is raised while resolving dependencies
 - **THEN** the response is `422` with error `ValidationError` and `details` carrying the field-level error list
-
-### Requirement: Request Body Size Limiting
-
-The system SHALL reject oversized request bodies before buffering them, using both the
-declared `Content-Length` and a streaming byte counter, so peak memory stays bounded on
-a memory-capped host.
-
-#### Scenario: Oversized declared Content-Length
-
-- **WHEN** a request declares a `Content-Length` above the file-size limit plus multipart overhead
-- **THEN** the system responds `413` with error `FileSizeExceeded` before reading any body bytes
-
-#### Scenario: Chunked or understated body
-
-- **WHEN** a request omits or understates `Content-Length` and streams more bytes than the limit
-- **THEN** the system aborts the moment the running total exceeds the limit and responds `413`
-
-#### Scenario: Multipart overhead headroom
-
-- **WHEN** the request-level limit is computed
-- **THEN** it is the configured file-size limit plus 1 MiB of headroom for multipart framing and form fields
-
-#### Scenario: Non-HTTP scope
-
-- **WHEN** the ASGI scope is not `http`
-- **THEN** the request passes through unmodified
-
-### Requirement: Correlation Identifiers
-
-The system SHALL attach a correlation identifier to search, pipeline, and collection
-operations and SHALL echo it in the corresponding response and log lines, so a single
-request can be traced across the asynchronous pipeline.
-
-#### Scenario: Search request
-
-- **WHEN** a search request is handled
-- **THEN** a correlation id is generated, logged with the request and completion lines, and returned in the response
-
-#### Scenario: Pipeline message
-
-- **WHEN** a document flows through the queue-driven pipeline
-- **THEN** the correlation id travels in the queue message envelope and appears in each stage's log lines
