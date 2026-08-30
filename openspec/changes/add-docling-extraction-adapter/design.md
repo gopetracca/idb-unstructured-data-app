@@ -194,6 +194,28 @@ the chunker's tokenizer (AIA-416), and the resolution there is the precedent:
 Point 3 is the one worth insisting on: without it the failure is a hung queue trigger, a
 message redelivered to a second hung trigger, and a poison queue entry with no explanation.
 
+Build-time prefetch is confirmed viable in this build environment, which settles the
+question of whether Docling can run inside the VNet at all. It carries three requirements
+of its own, and they are build-pipeline work, not adapter work:
+
+- **The build agent needs egress the runtime does not have.** Images are built server-side
+  by ACR (`container-build-acr.yml`), so the model download happens on the ACR build agent
+  rather than on a GitHub runner. That agent must reach the model host, and the corporate
+  TLS-inspection root may apply to it exactly as it does to the existing `pip`/`uv` step.
+- **Model versions must be pinned.** An unpinned prefetch makes two builds of the same
+  commit produce different extraction behaviour, which forfeits the reproducibility that
+  is one of the main arguments for Docling over a hosted service in the first place.
+- **The build must verify what it downloaded.** If the prefetch silently produces nothing,
+  the construction-time check in point 3 turns a build problem into a startup failure in a
+  deployed environment. The build should fail on the spot instead. This is the same reason
+  the existing tokenizer warm-up runs a real `tiktoken.get_encoding` call rather than just
+  creating the cache directory.
+
+`container-build-acr.yml` currently accepts no build arguments at all — the
+`INSTALL_IADB_CA` arg exists in the Dockerfile and in `container-docker-build.yml`, but
+there is no path for any build arg through the ACR workflow. Plumbing that through is a
+prerequisite for enabling the extra in a deployed image.
+
 ## Decision: `analysis.json` is engine-tagged, never engine-guessed
 
 `preserve-full-extraction-output` stores the raw analysis at
@@ -216,6 +238,7 @@ filter that `preserve-full-extraction-output` was written to remove.
   cannot be computed.
 - Measured CPU seconds and peak RSS per page on representative IADB documents — decides
   Container Apps sizing and the concurrency limit.
-- Measured image-size delta with the `docling` extra and the prefetched artifacts.
+- Measured image-size delta with the `docling` extra and the prefetched artifacts, and
+  whether it should therefore stay opt-in per build or become the default.
 - Whether markdown-dialect differences between the two engines materially change chunk
   boundaries for the structure-aware Chonkie chunker. The harness should report it.

@@ -14,7 +14,9 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       count, and a markdown similarity score between the two `extracted_text` outputs.
 - [ ] 0.3 Run the harness and record CPU seconds per page and peak RSS per page. These are
       the numbers the Container Apps sizing in §6 depends on.
-- [ ] 0.4 Measure the image-size delta with the `docling` extra plus prefetched artifacts.
+- [ ] 0.4 Measure the image-size delta with the `docling` extra plus prefetched artifacts,
+      and the cold-start delta it causes. Decide from the numbers whether the extra stays
+      opt-in per build or becomes the default.
 - [ ] 0.5 Chunk-boundary check: run `chunk_document`'s strategy over both engines'
       `extracted_text` for the same document and report whether the markdown-dialect
       difference materially moves chunk boundaries.
@@ -45,9 +47,19 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
 - [ ] 2.2 Add a build arg (default off) that installs the extra and runs
       `docling-tools models download` into a fixed path, mirroring the tiktoken cache
       warming already in the Dockerfile.
-- [ ] 2.3 Set `DOCLING_ARTIFACTS_PATH` as `ENV` so it persists into the final image, and
+- [ ] 2.3 Pin the model artifact versions the prefetch downloads, so two builds of the same
+      commit produce the same extraction behaviour.
+- [ ] 2.4 Verify the artifacts in the same build step: assert the expected files exist and
+      are non-empty, and fail the build if not — as the tokenizer step proves itself by
+      running a real `get_encoding` call rather than just creating a directory.
+- [ ] 2.5 Set `DOCLING_ARTIFACTS_PATH` as `ENV` so it persists into the final image, and
       confirm `HF_HUB_OFFLINE=1` still holds with the artifacts in place.
-- [ ] 2.4 Verify the image builds and starts with the extra off — unchanged size, no
+- [ ] 2.6 Add build-args plumbing to `.github/workflows/container-build-acr.yml`, which
+      accepts none today, and pass the new arg through the delivery workflows that call it.
+      Without this the arg cannot reach the ACR server-side build.
+- [ ] 2.7 Confirm the ACR build agent can reach the model host, and that the corporate
+      TLS-inspection root is handled for it as it already is for the dependency install.
+- [ ] 2.8 Verify the image builds and starts with the extra off — unchanged size, no
       artifacts, no Docling import.
 
 ## 3. Adapter and mapper

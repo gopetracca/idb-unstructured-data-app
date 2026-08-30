@@ -29,6 +29,16 @@ when it is absent.
 - **WHEN** the image is built with the Docling extra enabled
 - **THEN** Docling's layout and table-structure model artifacts are downloaded into a fixed path during the build and that path is exposed via `DOCLING_ARTIFACTS_PATH` in the final image
 
+#### Scenario: Prefetch proves itself at build time
+
+- **WHEN** the model artifacts are prefetched during the build
+- **THEN** the build verifies they are present and non-empty and fails if they are not, so a failed download cannot surface later as a startup failure in a deployed environment
+
+#### Scenario: Extraction models are pinned
+
+- **WHEN** the same commit is built twice with the Docling extra enabled
+- **THEN** the same model artifact versions are downloaded, so the image's extraction behaviour is reproducible
+
 #### Scenario: Missing extraction artifacts fail fast
 
 - **WHEN** Docling is the configured engine and its artifacts are absent at startup
@@ -50,6 +60,11 @@ that do not use it do not carry its weight.
 
 - **WHEN** the image is built with the Docling extra
 - **THEN** the dependencies install from the lockfile with the rest, so the image still matches what CI resolved
+
+#### Scenario: Build configuration reaches the registry-side build
+
+- **WHEN** the image is built server-side by the container registry
+- **THEN** the build arguments that select the Docling extra are passed through to it, so the deployed image can be built with the same configuration as a local build
 
 #### Scenario: Engine selected without its dependency
 

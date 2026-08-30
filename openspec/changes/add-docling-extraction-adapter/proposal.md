@@ -55,7 +55,10 @@ evidence behind it.
   prefetched into the image with `docling-tools models download` and addressed via
   `DOCLING_ARTIFACTS_PATH`, exactly as the tiktoken cache is warmed today — and the adapter
   must fail at construction with a message naming the missing artifacts rather than hanging
-  on a blocked network call.
+  on a blocked network call. Build-time prefetch is confirmed viable here; what it needs in
+  return is pinned model versions, a build step that verifies the download instead of
+  assuming it, and build-args plumbing through the ACR server-side build workflow, which
+  accepts none today.
 - **Bounded conversion.** Extraction runs inside a queue trigger whose messages are
   invisible for five minutes and poisoned after two dequeues. A CPU-bound Docling
   conversion of a long document can exceed that and be silently redelivered. The adapter
@@ -91,7 +94,9 @@ chunking, vectorization, or search behaviour; GPU inference; Docling's VLM pipel
     no longer defaulted to the Azure value at every call site
   - `src/application/use_cases/process_document.py` — write whichever raw payload the
     adapter returned
-  - `Dockerfile` — prefetch model artifacts, `DOCLING_ARTIFACTS_PATH`
+  - `Dockerfile` — prefetch and verify model artifacts, `DOCLING_ARTIFACTS_PATH`
+  - `.github/workflows/container-build-acr.yml` — build-args plumbing, which it lacks
+    entirely today, plus the delivery workflows that call it
   - `pyproject.toml` / `uv.lock` — optional `docling` group
   - `scripts/compare_extraction_adapters.py` — new
   - `openspec/coverage.md` — `src/infrastructure/docling/**` → `content-extraction`
