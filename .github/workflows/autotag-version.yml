@@ -9,5 +9,18 @@ on:
 
 jobs:
   automated-version:
-    uses: dx-developer-platform/az-wf-github-core-workflows/.github/workflows/automated-version.yml@v1
-    secrets: inherit
+    # [IDB-ONLY] The whole job body is a call into the private
+    # dx-developer-platform reusable workflow (Release Please based semantic
+    # versioning). Outside the IDB organization it is unresolvable, so every
+    # push to main fails at workflow resolution. Restore the two commented
+    # lines below — and delete the no-op job that replaces them — when this
+    # repository lives in that organization.
+    #
+    # uses: dx-developer-platform/az-wf-github-core-workflows/.github/workflows/automated-version.yml@v1
+    # secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Automated versioning disabled
+        run: |
+          echo "Automated version tagging is disabled outside the IDB organization."
+          echo "Tag releases manually: git tag vX.Y.Z && git push origin vX.Y.Z"
