@@ -11,6 +11,14 @@ from src.application.use_cases.chunk_document import ChunkDocumentUseCase
 from src.core.entities.chunk import Chunk, ChunkMetadata
 from src.core.entities.composites import DocumentWithPipeline
 from src.core.entities.document import Document
+from src.core.entities.document_analysis import (
+    DocumentLine,
+    ExtractedParagraph,
+    ExtractedTable,
+    MarkdownOutput,
+    PageContent,
+    TableCell,
+)
 from src.core.entities.pipeline_state import OverallStatus, PipelineState, ProcessingStage
 from src.core.errors import (
     ChunkingError,
@@ -19,6 +27,8 @@ from src.core.errors import (
     TextNotFoundError,
 )
 from src.core.value_objects.chunking_strategy import ChunkingStrategy, ChunkingStrategyName
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -461,3 +471,77 @@ class TestChunkDocumentUseCase:
             await chunk_document_use_case.execute(request)
 
         mock_pipeline_store.mark_failed.assert_called_once()
+
+
+class TestChunkingIsUnaffectedByPreservedStructure:
+    """The enriched text.json must not disturb the stage that reads it.
+
+    The chunker reads `extracted_text` and nothing else. That is what makes the new
+    structural fields safe to add without a coordinated deploy, so it is worth a test
+    rather than an assumption.
+    """
+
+    @staticmethod
+    def _enriched_text_json() -> dict:
+        """A text.json as written after structural preservation."""
+        output = MarkdownOutput(
+            file_id="test-file",
+            extracted_text="This is the extracted text content for chunking.",
+            pages=[
+                PageContent(
+                    page_number=1,
+                    text="This is the extracted text content for chunking.",
+                    word_count=8,
+                    width=8.5,
+                    height=11.0,
+                    unit="inch",
+                    lines=[DocumentLine(content="This is the extracted text content for chunking.")],
+                )
+            ],
+            tables=[
+                ExtractedTable(
+                    row_count=1,
+                    column_count=2,
+                    cells=[
+                        TableCell(row_index=0, column_index=0, content="Year"),
+                        TableCell(row_index=0, column_index=1, content="Amount"),
+                    ],
+                )
+            ],
+            paragraphs=[ExtractedParagraph(content="Title", role="title")],
+            content_format="markdown",
+        )
+        return output.model_dump(mode="json")
+
+    async def test_chunking_reads_enriched_output_unchanged(
+        self,
+        chunk_document_use_case: ChunkDocumentUseCase,
+        mock_blob_client: MagicMock,
+    ):
+        mock_blob_client.download_blob = AsyncMock(
+            return_value=json.dumps(self._enriched_text_json()).encode()
+        )
+
+        result = await chunk_document_use_case.execute(
+            ChunkDocumentRequest(file_id="test-file", tenant_id="default")
+        )
+
+        assert result.status == ProcessingStatus.COMPLETED
+        assert result.chunk_count == 2
+
+    async def test_chunker_still_receives_only_the_extracted_text(
+        self,
+        chunk_document_use_case: ChunkDocumentUseCase,
+        mock_blob_client: MagicMock,
+        mock_chunker: MagicMock,
+    ):
+        mock_blob_client.download_blob = AsyncMock(
+            return_value=json.dumps(self._enriched_text_json()).encode()
+        )
+
+        await chunk_document_use_case.execute(
+            ChunkDocumentRequest(file_id="test-file", tenant_id="default")
+        )
+
+        text_argument = mock_chunker.chunk_text.call_args.kwargs["text"]
+        assert text_argument == "This is the extracted text content for chunking."

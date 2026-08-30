@@ -45,6 +45,14 @@ class Document(BaseModel):
         default=None,
         description="Blob storage path for extracted text",
     )
+    analysis_blob_ref: str | None = Field(
+        default=None,
+        description=(
+            "Blob storage path for the verbatim extraction-service response. "
+            "Null means the raw analysis was not captured — either the document was "
+            "extracted before it was preserved, or persistence was disabled."
+        ),
+    )
 
     # External identifiers
     collection_name: str | None = Field(

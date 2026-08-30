@@ -9,9 +9,22 @@ from azure.core.exceptions import HttpResponseError
 from src.application.ports.document_intelligence import DocumentIntelligencePort
 from src.config.settings import DocumentIntelligenceSettings, get_settings
 from src.core.entities.document_analysis import (
+    BoundingRegion,
+    DocumentLine,
+    DocumentSection,
+    DocumentStyle,
+    DocumentWord,
+    ExtractedFigure,
+    ExtractedParagraph,
+    ExtractedTable,
     ExtractionMetadata,
+    KeyValueElement,
+    KeyValuePair,
     MarkdownOutput,
     PageContent,
+    SelectionMark,
+    TableCell,
+    TextSpan,
 )
 from src.core.errors import DocumentProcessingError, UnsupportedFormatError
 from src.infrastructure.azure.clients.document_intelligence_client import (
@@ -19,6 +32,49 @@ from src.infrastructure.azure.clients.document_intelligence_client import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _enum_value(value) -> str | None:
+    """Return the plain string behind an SDK enum, or None."""
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
+
+
+def _map_span(span) -> TextSpan | None:
+    if span is None:
+        return None
+    return TextSpan(offset=span.offset or 0, length=span.length or 0)
+
+
+def _map_spans(spans) -> list[TextSpan]:
+    return [TextSpan(offset=s.offset or 0, length=s.length or 0) for s in (spans or [])]
+
+
+def _map_regions(regions) -> list[BoundingRegion]:
+    return [
+        BoundingRegion(
+            page_number=region.page_number,
+            polygon=list(getattr(region, "polygon", None) or []),
+        )
+        for region in (regions or [])
+    ]
+
+
+def _map_kv_element(element) -> KeyValueElement | None:
+    if element is None:
+        return None
+    return KeyValueElement(
+        content=getattr(element, "content", None) or "",
+        spans=_map_spans(getattr(element, "spans", None)),
+        bounding_regions=_map_regions(getattr(element, "bounding_regions", None)),
+    )
+
+
+def _caption_content(caption) -> str | None:
+    if caption is None:
+        return None
+    return getattr(caption, "content", None)
 
 
 class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
@@ -147,6 +203,12 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
         """
         Map Azure AnalyzeResult to domain MarkdownOutput.
 
+        Everything the service returned is carried across: the markdown, the structural
+        elements (tables, figures, paragraphs, sections, styles, key-value pairs), the
+        per-page layout, and the spans and bounding regions that tie each element back to
+        the text and to the page. The verbatim response rides along in `raw_analysis` for
+        the caller to persist as a sidecar; it is excluded from serialisation.
+
         Args:
             result: Azure Document Intelligence AnalyzeResult
             file_id: File identifier
@@ -175,9 +237,42 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
 
                 pages.append(
                     PageContent(
-                        page_number=idx,
+                        # The service's own page number when it has one: for a multi-file
+                        # or partial analysis it need not match the enumeration index.
+                        page_number=getattr(page, "page_number", None) or idx,
                         text=page_text,
                         word_count=page_word_count,
+                        width=getattr(page, "width", None),
+                        height=getattr(page, "height", None),
+                        unit=_enum_value(getattr(page, "unit", None)),
+                        angle=getattr(page, "angle", None),
+                        spans=_map_spans(getattr(page, "spans", None)),
+                        lines=[
+                            DocumentLine(
+                                content=line.content or "",
+                                spans=_map_spans(getattr(line, "spans", None)),
+                                polygon=list(getattr(line, "polygon", None) or []),
+                            )
+                            for line in (getattr(page, "lines", None) or [])
+                        ],
+                        words=[
+                            DocumentWord(
+                                content=word.content or "",
+                                confidence=getattr(word, "confidence", None),
+                                span=_map_span(getattr(word, "span", None)),
+                                polygon=list(getattr(word, "polygon", None) or []),
+                            )
+                            for word in (page.words or [])
+                        ],
+                        selection_marks=[
+                            SelectionMark(
+                                state=_enum_value(getattr(mark, "state", None)),
+                                confidence=getattr(mark, "confidence", None),
+                                spans=_map_spans(getattr(mark, "spans", None)),
+                                polygon=list(getattr(mark, "polygon", None) or []),
+                            )
+                            for mark in (getattr(page, "selection_marks", None) or [])
+                        ],
                     )
                 )
                 total_word_count += page_word_count
@@ -214,6 +309,46 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             if page_confidences:
                 confidence = sum(page_confidences) / len(page_confidences)
 
+        tables = [self._map_table(table) for table in (result.tables or [])]
+        figures = [self._map_figure(figure) for figure in (getattr(result, "figures", None) or [])]
+        paragraphs = [
+            ExtractedParagraph(
+                content=paragraph.content or "",
+                role=_enum_value(getattr(paragraph, "role", None)),
+                spans=_map_spans(getattr(paragraph, "spans", None)),
+                bounding_regions=_map_regions(getattr(paragraph, "bounding_regions", None)),
+            )
+            for paragraph in (getattr(result, "paragraphs", None) or [])
+        ]
+        sections = [
+            DocumentSection(
+                elements=list(getattr(section, "elements", None) or []),
+                spans=_map_spans(getattr(section, "spans", None)),
+            )
+            for section in (getattr(result, "sections", None) or [])
+        ]
+        styles = [
+            DocumentStyle(
+                is_handwritten=getattr(style, "is_handwritten", None),
+                confidence=getattr(style, "confidence", None),
+                font_style=_enum_value(getattr(style, "font_style", None)),
+                font_weight=_enum_value(getattr(style, "font_weight", None)),
+                color=getattr(style, "color", None),
+                background_color=getattr(style, "background_color", None),
+                similar_font_family=getattr(style, "similar_font_family", None),
+                spans=_map_spans(getattr(style, "spans", None)),
+            )
+            for style in (getattr(result, "styles", None) or [])
+        ]
+        key_value_pairs = [
+            KeyValuePair(
+                key=_map_kv_element(getattr(pair, "key", None)) or KeyValueElement(),
+                value=_map_kv_element(getattr(pair, "value", None)),
+                confidence=getattr(pair, "confidence", None),
+            )
+            for pair in (getattr(result, "key_value_pairs", None) or [])
+        ]
+
         # Create extraction metadata
         extraction_metadata = ExtractionMetadata(
             page_count=len(pages),
@@ -221,14 +356,23 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             extraction_confidence=round(confidence, 4),
             extraction_method="azure-document-intelligence",
             api_version=result.api_version or self._settings.api_version,
+            table_count=len(tables),
+            figure_count=len(figures),
+            paragraph_count=len(paragraphs),
+            # Flipped by whoever actually writes the sidecar; the adapter only supplies it.
+            raw_analysis_stored=False,
         )
 
         logger.debug(
-            "Document analysis mapped: file_id=%s, pages=%d, words=%d, confidence=%.4f",
+            "Document analysis mapped: file_id=%s, pages=%d, words=%d, confidence=%.4f, "
+            "tables=%d, figures=%d, paragraphs=%d",
             file_id,
             len(pages),
             total_word_count,
             confidence,
+            len(tables),
+            len(figures),
+            len(paragraphs),
         )
 
         return MarkdownOutput(
@@ -238,6 +382,73 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             pages=pages,
             extraction_metadata=extraction_metadata,
             created_at=datetime.utcnow(),
+            tables=tables,
+            figures=figures,
+            paragraphs=paragraphs,
+            sections=sections,
+            styles=styles,
+            key_value_pairs=key_value_pairs,
+            content_format=_enum_value(getattr(result, "content_format", None)),
+            model_id=getattr(result, "model_id", None),
+            raw_analysis=self._raw_payload(result),
+        )
+
+    @staticmethod
+    def _raw_payload(result: AnalyzeResult) -> dict | None:
+        """Serialise the response verbatim, tolerating a result that cannot serialise.
+
+        A raw copy that fails to serialise must not cost us the typed output, which is the
+        pipeline's actual contract — so this degrades to None and is reported as
+        `raw_analysis_stored=False` rather than raising.
+        """
+        try:
+            return DocumentIntelligenceClient.to_raw_payload(result)
+        except Exception:
+            logger.warning("Could not serialise raw analysis result", exc_info=True)
+            return None
+
+    @staticmethod
+    def _map_table(table) -> ExtractedTable:
+        """Map one table, keeping every cell's position in the grid."""
+        return ExtractedTable(
+            row_count=getattr(table, "row_count", 0) or 0,
+            column_count=getattr(table, "column_count", 0) or 0,
+            cells=[
+                TableCell(
+                    row_index=getattr(cell, "row_index", 0) or 0,
+                    column_index=getattr(cell, "column_index", 0) or 0,
+                    # The service omits a span of 1 rather than sending it.
+                    row_span=getattr(cell, "row_span", None) or 1,
+                    column_span=getattr(cell, "column_span", None) or 1,
+                    kind=_enum_value(getattr(cell, "kind", None)) or "content",
+                    content=cell.content or "",
+                    spans=_map_spans(getattr(cell, "spans", None)),
+                    bounding_regions=_map_regions(getattr(cell, "bounding_regions", None)),
+                )
+                for cell in (getattr(table, "cells", None) or [])
+            ],
+            caption=_caption_content(getattr(table, "caption", None)),
+            footnotes=[
+                footnote.content or ""
+                for footnote in (getattr(table, "footnotes", None) or [])
+            ],
+            spans=_map_spans(getattr(table, "spans", None)),
+            bounding_regions=_map_regions(getattr(table, "bounding_regions", None)),
+        )
+
+    @staticmethod
+    def _map_figure(figure) -> ExtractedFigure:
+        """Map one figure."""
+        return ExtractedFigure(
+            figure_id=getattr(figure, "id", None),
+            caption=_caption_content(getattr(figure, "caption", None)),
+            footnotes=[
+                footnote.content or ""
+                for footnote in (getattr(figure, "footnotes", None) or [])
+            ],
+            elements=list(getattr(figure, "elements", None) or []),
+            spans=_map_spans(getattr(figure, "spans", None)),
+            bounding_regions=_map_regions(getattr(figure, "bounding_regions", None)),
         )
 
     def close(self) -> None:

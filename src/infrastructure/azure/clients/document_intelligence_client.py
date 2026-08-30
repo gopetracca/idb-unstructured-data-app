@@ -3,6 +3,7 @@
 import asyncio
 import io
 import logging
+from typing import Any
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient as AzureDocIntelClient
 from azure.ai.documentintelligence.models import (
@@ -14,7 +15,6 @@ from azure.core.exceptions import HttpResponseError
 
 from src.config.settings import DocumentIntelligenceSettings, get_settings
 from src.infrastructure.azure.clients.credentials import get_azure_credential
-
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,17 @@ class DocumentIntelligenceClient:
             len(result.pages) if result.pages else 0,
         )
         return result
+
+    @staticmethod
+    def to_raw_payload(result: AnalyzeResult) -> dict[str, Any]:
+        """Serialise an analysis result verbatim, including fields the SDK does not model.
+
+        The generated SDK models are mapping-backed, so `as_dict()` round-trips whatever
+        the service actually sent — including keys added by a newer service version that
+        this SDK has no attribute for. That is the point: the raw copy must not be a
+        filter, or it would lose exactly what filtering already lost once.
+        """
+        return result.as_dict()
 
     async def analyze_document_from_url(
         self,

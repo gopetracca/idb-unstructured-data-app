@@ -980,6 +980,94 @@ curl -X POST "https://{app}.azurewebsites.net/api/v1/contents" \
 - `404` - Document not found
 - `500` - Internal server error
 
+#### Extraction artifacts
+
+The stage writes two blobs to the output container and records both paths on the document
+row, which stays the source of truth for where content lives.
+
+| Blob | Column | Contents |
+| --- | --- | --- |
+| `{tenant_id}/{file_id}/text.json` | `text_blob_ref` | The typed extraction output consumed by the pipeline |
+| `{tenant_id}/{file_id}/analysis.json` | `analysis_blob_ref` | The Document Intelligence response, verbatim |
+
+`text.json` carries the markdown *and* the document's structure. Fields are additive: the
+original `extracted_text`, `pages[].text`, `pages[].word_count` and `extraction_metadata`
+keep their meaning, so consumers written against the earlier shape (the chunker reads
+`extracted_text` only) are unaffected.
+
+```jsonc
+{
+  "file_id": "550e8400-...",
+  "extracted_text": "# Quarterly Report\n\n| Budget Summary ||\n...",  // markdown
+  "content_format": "markdown",
+  "model_id": "prebuilt-layout",
+  "pages": [
+    {
+      "page_number": 1,
+      "text": "Quarterly Report The table below ...",   // words joined by spaces; lossy
+      "word_count": 42,
+      "width": 8.5, "height": 11.0, "unit": "inch", "angle": 0.0,
+      "lines": [{"content": "Quarterly Report", "spans": [{"offset": 2, "length": 16}]}],
+      "words": [{"content": "Quarterly", "confidence": 0.99, "span": {"offset": 2, "length": 9}}],
+      "selection_marks": []
+    }
+  ],
+  "tables": [
+    {
+      "row_count": 4, "column_count": 2,
+      "caption": "Table 1. Budget by year",
+      "footnotes": ["Amounts in thousands."],
+      "cells": [
+        {
+          "row_index": 0, "column_index": 0,
+          "row_span": 1, "column_span": 2,           // merged title cell
+          "kind": "columnHeader",
+          "content": "Budget Summary",
+          "spans": [{"offset": 24, "length": 14}],
+          "bounding_regions": [{"page_number": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}]
+        }
+        // ... one entry per cell
+      ]
+    }
+  ],
+  "paragraphs": [{"content": "Quarterly Report", "role": "title", "spans": [...]}],
+  "figures": [], "sections": [], "styles": [], "key_value_pairs": [],
+  "extraction_metadata": {
+    "page_count": 1, "word_count": 42,
+    "extraction_confidence": 0.987,
+    "extraction_method": "azure-document-intelligence",
+    "api_version": "2024-11-30",
+    "table_count": 1, "figure_count": 0, "paragraph_count": 6,
+    "raw_analysis_stored": true
+  }
+}
+```
+
+Two things make this usable rather than merely verbose:
+
+- **Cells, not rendered rows.** `row_index`/`column_index` plus `row_span`/`column_span`
+  rebuild the grid exactly, including merged cells — which a rendered markdown table
+  cannot express. `ExtractedTable.to_grid()` does this in code.
+- **Spans are offsets into `extracted_text`.** Any element can be mapped back onto the
+  markdown a chunk was cut from, and `bounding_regions` map it onto the page.
+
+`analysis.json` is the service response as received, including fields this API does not
+model. It exists so that a future need — or a newer service version — does not require
+re-analysing the document, which is the most expensive operation in the pipeline.
+
+**Settings:**
+
+- `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` (default `true`) — write `analysis.json`.
+  Set it to `false` where blob volume matters; `analysis.json` runs several times the size
+  of `text.json` on table-heavy documents. The structural fields in `text.json` are not
+  gated by this setting.
+
+A failed `analysis.json` write does not fail extraction: the response is still `202`, and
+the loss is visible afterwards as `raw_analysis_stored: false` with a null
+`analysis_blob_ref`. A null `analysis_blob_ref` also means "extracted before the raw
+response was kept" — documents processed before this feature have no sidecar and are not
+backfilled.
+
 ---
 
 ### Chunk Document

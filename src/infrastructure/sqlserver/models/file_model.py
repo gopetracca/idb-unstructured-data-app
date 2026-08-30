@@ -44,6 +44,7 @@ class FileTable(Base):
     # Blob storage references (SSOT for content location)
     raw_blob_ref: Mapped[str | None] = mapped_column(sa.String(1024), nullable=True)
     text_blob_ref: Mapped[str | None] = mapped_column(sa.String(1024), nullable=True)
+    analysis_blob_ref: Mapped[str | None] = mapped_column(sa.String(1024), nullable=True)
 
     # Collection reference
     collection_name: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
@@ -105,6 +106,7 @@ class FileTable(Base):
     _FILE_TABLE_FIELDS = frozenset({
         "file_id", "tenant_id", "blob_name", "content_type", "size_bytes",
         "content_hash", "file_version", "raw_blob_ref", "text_blob_ref",
+        "analysis_blob_ref",
         "collection_name", "ezshare_id",
         "upload_timestamp", "last_updated",
     })

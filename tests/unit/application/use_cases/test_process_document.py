@@ -1,5 +1,7 @@
 """Unit tests for ProcessDocumentUseCase."""
 
+import json
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,6 +24,8 @@ from src.core.errors import (
     DocumentProcessingError,
     UnsupportedFormatError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -331,3 +335,243 @@ class TestProcessDocumentUseCase:
         result = await process_document_use_case.execute(request)
 
         assert result.correlation_id == correlation_id
+
+
+RAW_ANALYSIS = {
+    "apiVersion": "2024-11-30",
+    "modelId": "prebuilt-layout",
+    "tables": [{"rowCount": 2, "columnCount": 2, "cells": [{"rowIndex": 0, "columnIndex": 0}]}],
+    "fieldFromTheFuture": {"nested": [1, 2]},
+}
+
+
+@pytest.fixture
+def markdown_output_with_raw(sample_markdown_output: MarkdownOutput) -> MarkdownOutput:
+    """An analysis output that carries a verbatim service response."""
+    return sample_markdown_output.model_copy(update={"raw_analysis": RAW_ANALYSIS})
+
+
+def build_use_case(
+    blob_client,
+    adapter,
+    pipeline_store,
+    output: MarkdownOutput,
+    persist_raw_analysis: bool = True,
+) -> ProcessDocumentUseCase:
+    """Wire a use case whose adapter returns `output`."""
+    adapter.analyze_document = AsyncMock(return_value=output)
+    return ProcessDocumentUseCase(
+        blob_client=blob_client,
+        document_intelligence=adapter,
+        pipeline_store=pipeline_store,
+        persist_raw_analysis=persist_raw_analysis,
+    )
+
+
+def uploads_by_path(mock_blob_client: MagicMock) -> dict:
+    """Index upload_blob calls by blob path."""
+    return {call.kwargs["blob_path"]: call.kwargs for call in mock_blob_client.upload_blob.call_args_list}
+
+
+class TestRawAnalysisPersistence:
+    """The verbatim service response is stored beside the extracted text."""
+
+    @pytest.fixture
+    def request_(self, sample_file_id: str, sample_tenant_id: str) -> DocumentAnalysisRequest:
+        return DocumentAnalysisRequest(
+            file_id=sample_file_id,
+            tenant_id=sample_tenant_id,
+            source_container="raw",
+            output_container="text",
+        )
+
+    async def test_analysis_json_is_written_verbatim(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        markdown_output_with_raw,
+        request_,
+        sample_file_id,
+        sample_tenant_id,
+    ):
+        use_case = build_use_case(
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            mock_pipeline_store,
+            markdown_output_with_raw,
+        )
+
+        await use_case.execute(request_)
+
+        path = f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+        uploads = uploads_by_path(mock_blob_client)
+        assert path in uploads
+        assert uploads[path]["container"] == "text"
+        assert json.loads(uploads[path]["data"]) == RAW_ANALYSIS
+
+    async def test_analysis_blob_ref_is_recorded(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        markdown_output_with_raw,
+        request_,
+        sample_file_id,
+        sample_tenant_id,
+    ):
+        """Blob references in SQL are the source of truth, so the path gets recorded."""
+        use_case = build_use_case(
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            mock_pipeline_store,
+            markdown_output_with_raw,
+        )
+
+        await use_case.execute(request_)
+
+        kwargs = mock_pipeline_store.update_blob_references.call_args.kwargs
+        assert kwargs["analysis_blob_ref"] == f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+        assert kwargs["text_blob_ref"] == f"{sample_tenant_id}/{sample_file_id}/text.json"
+
+    async def test_text_json_records_that_the_raw_copy_landed(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        markdown_output_with_raw,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        use_case = build_use_case(
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            mock_pipeline_store,
+            markdown_output_with_raw,
+        )
+
+        await use_case.execute(request_)
+
+        text_json = json.loads(
+            uploads_by_path(mock_blob_client)[f"{sample_tenant_id}/{sample_file_id}/text.json"]["data"]
+        )
+        assert text_json["extraction_metadata"]["raw_analysis_stored"] is True
+        # The raw copy lives in analysis.json, not duplicated into text.json.
+        assert "raw_analysis" not in text_json
+
+    async def test_persistence_can_be_disabled(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        markdown_output_with_raw,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT=false suppresses only the sidecar."""
+        use_case = build_use_case(
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            mock_pipeline_store,
+            markdown_output_with_raw,
+            persist_raw_analysis=False,
+        )
+
+        result = await use_case.execute(request_)
+
+        uploads = uploads_by_path(mock_blob_client)
+        assert f"{sample_tenant_id}/{sample_file_id}/analysis.json" not in uploads
+        assert result.status == ProcessingStatus.COMPLETED
+        assert mock_pipeline_store.update_blob_references.call_args.kwargs["analysis_blob_ref"] is None
+        text_json = json.loads(uploads[f"{sample_tenant_id}/{sample_file_id}/text.json"]["data"])
+        assert text_json["extraction_metadata"]["raw_analysis_stored"] is False
+        # The structural elements are not gated by the setting.
+        assert "tables" in text_json
+
+    async def test_adapter_without_a_raw_payload_writes_no_sidecar(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """The fake adapter has no service response to copy."""
+        use_case = build_use_case(
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            mock_pipeline_store,
+            sample_markdown_output,
+        )
+
+        result = await use_case.execute(request_)
+
+        assert f"{sample_tenant_id}/{sample_file_id}/analysis.json" not in uploads_by_path(
+            mock_blob_client
+        )
+        assert result.status == ProcessingStatus.COMPLETED
+
+    async def test_a_failed_sidecar_write_does_not_fail_the_stage(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        markdown_output_with_raw,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """text.json is the pipeline's contract; losing the sidecar only degrades fidelity."""
+        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
+        analysis_path = f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+
+        async def upload(container, blob_path, data, content_type=None, **kwargs):
+            if blob_path == analysis_path:
+                raise RuntimeError("blob storage said no")
+            return f"https://blob/{blob_path}"
+
+        mock_blob_client.upload_blob = AsyncMock(side_effect=upload)
+
+        use_case = build_use_case(
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            mock_pipeline_store,
+            markdown_output_with_raw,
+        )
+
+        result = await use_case.execute(request_)
+
+        assert result.status == ProcessingStatus.COMPLETED
+        assert mock_pipeline_store.update_blob_references.call_args.kwargs["analysis_blob_ref"] is None
+        written = [c.kwargs["data"] for c in mock_blob_client.upload_blob.call_args_list
+                   if c.kwargs["blob_path"] == text_path]
+        assert json.loads(written[0])["extraction_metadata"]["raw_analysis_stored"] is False
+
+    async def test_raw_payload_with_a_datetime_still_serialises(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """A value json cannot encode natively must not cost us the copy."""
+        output = sample_markdown_output.model_copy(
+            update={"raw_analysis": {"createdDateTime": datetime(2026, 1, 1, 12, 0)}}
+        )
+        use_case = build_use_case(
+            mock_blob_client, mock_document_intelligence_adapter, mock_pipeline_store, output
+        )
+
+        await use_case.execute(request_)
+
+        data = uploads_by_path(mock_blob_client)[
+            f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+        ]["data"]
+        assert "2026-01-01 12:00:00" in data

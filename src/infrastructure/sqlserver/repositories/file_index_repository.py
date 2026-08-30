@@ -296,6 +296,7 @@ class FileIndexRepositorySQLServer:
         file_id: str,
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
+        analysis_blob_ref: str | None = None,
     ) -> FileIndex | None:
         """Update blob storage references for a file (atomic single-session)."""
         async with self._session_factory() as session:
@@ -306,6 +307,8 @@ class FileIndexRepositorySQLServer:
                 row.raw_blob_ref = raw_blob_ref
             if text_blob_ref is not None:
                 row.text_blob_ref = text_blob_ref
+            if analysis_blob_ref is not None:
+                row.analysis_blob_ref = analysis_blob_ref
             await session.commit()
             return row.to_file_index()
 

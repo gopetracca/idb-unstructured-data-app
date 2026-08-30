@@ -67,6 +67,7 @@ class PipelineStorePort(Protocol):
         file_id: str,
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
+        analysis_blob_ref: str | None = None,
     ) -> None:
         """Update blob storage references for a file (on the files table)."""
         ...

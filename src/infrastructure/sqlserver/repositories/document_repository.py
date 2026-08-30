@@ -309,6 +309,7 @@ class DocumentRepositorySQLServer:
         file_id: str,
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
+        analysis_blob_ref: str | None = None,
     ) -> None:
         """Update blob storage references for a file (on the files table)."""
         async with self._session_factory() as session:
@@ -324,6 +325,8 @@ class DocumentRepositorySQLServer:
                 row.raw_blob_ref = raw_blob_ref
             if text_blob_ref is not None:
                 row.text_blob_ref = text_blob_ref
+            if analysis_blob_ref is not None:
+                row.analysis_blob_ref = analysis_blob_ref
             await session.commit()
 
     async def query_by_status(

@@ -99,6 +99,7 @@ class FileIndexStorePort(MetadataStorePort, Protocol):
         file_id: str,
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
+        analysis_blob_ref: str | None = None,
     ) -> FileIndex | None:
         """
         Update blob storage references for a file.
@@ -108,6 +109,7 @@ class FileIndexStorePort(MetadataStorePort, Protocol):
             file_id: File identifier
             raw_blob_ref: Optional raw file blob path to update
             text_blob_ref: Optional text file blob path to update
+            analysis_blob_ref: Optional raw-analysis blob path to update
 
         Returns:
             Updated FileIndex or None if not found
