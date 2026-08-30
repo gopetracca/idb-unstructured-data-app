@@ -13,11 +13,18 @@ and SHALL NOT recover them by matching patterns in the rendered text.
 - **THEN** each table's extent is taken from its block, and no chunk boundary falls inside a
   table
 
-#### Scenario: The rendering does not matter
+#### Scenario: The rules do not depend on the rendering
 
 - **WHEN** one document's tables were rendered as HTML and another's as pipe tables
-- **THEN** both are chunked identically with respect to table boundaries, headers, and
-  metadata
+- **THEN** the same rules apply to both — no cut inside a row, no cut inside a group of rows
+  joined by a merged cell, every piece composed as a fragment, and the same metadata
+  recorded — and no rule refers to the syntax of either rendering
+
+#### Scenario: Where the boundaries fall does depend on the rendering
+
+- **WHEN** the same table is rendered in two forms whose text lengths differ
+- **THEN** the number of pieces and the rows in each may differ, because the chunk size is a
+  budget on the composed text and one rendering consumes more of it per row than the other
 
 #### Scenario: Chunk text is the extractor's rendering
 
@@ -34,24 +41,26 @@ and SHALL NOT recover them by matching patterns in the rendered text.
 ### Requirement: Oversized Tables Are Split On Row Boundaries With Their Header
 
 The chunking stage SHALL split a table that exceeds the configured chunk size, cutting only
-between rows and repeating the table's header rows in every piece.
+between rows, so that every piece is a fragment of that table as the extraction contract
+defines one.
 
 #### Scenario: A table larger than the chunk size
 
 - **WHEN** a table's rendering exceeds the strategy's chunk size
-- **THEN** it is emitted as several chunks, each cut at a row boundary and each carrying the
-  table's header rows
+- **THEN** it is emitted as several chunks, each cut at a row boundary and each composed as a
+  fragment, so each carries whatever the rendering places before the first body row
 
 #### Scenario: A table within the chunk size
 
 - **WHEN** a table fits within the chunk size
-- **THEN** it is emitted as a single chunk and its header is not repeated
+- **THEN** it is emitted as a single chunk holding every body row, which is its full
+  rendering
 
 #### Scenario: Every piece is independently interpretable
 
 - **WHEN** a chunk holds rows from the middle of a table
-- **THEN** it begins with the table's header rows, so the columns its values belong to can
-  be determined from the chunk alone
+- **THEN** it begins with the table's prefix, so where the rendering carries column labels
+  there, the columns its values belong to can be determined from the chunk alone
 
 #### Scenario: Pieces are composed, not sliced
 
@@ -124,11 +133,13 @@ text, and SHALL NOT be relied upon as an instruction for slicing that text.
 - **WHEN** a chunk carries no content prepended from elsewhere
 - **THEN** its offsets delimit exactly the text it holds, as before
 
-#### Scenario: A table piece carrying a repeated header
+#### Scenario: A table piece carrying a repeated prefix
 
-- **WHEN** a piece of a split table is emitted with the table's header prepended
+- **WHEN** a piece of a split table is emitted
 - **THEN** its offsets delimit the rows the piece itself covers, and the piece additionally
-  records the source range of the prepended header and that it carries one
+  records the source range of the prefix it carries and that it carries one — whether that
+  prefix is markup alone, header rows, or a row the rendering requires but the provider did
+  not mark as a header
 
 #### Scenario: Length is recorded, not recomputed
 

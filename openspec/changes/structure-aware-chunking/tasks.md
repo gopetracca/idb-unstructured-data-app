@@ -39,7 +39,9 @@
 - [ ] 4.2 Update `has_table`'s description — it currently says "contains an HTML table",
       which will no longer be true.
 - [ ] 4.3 Restate `start_char`/`end_char` on `Chunk` and `ChunkIndex` as provenance of the
-      chunk's own content, and add the prepended-header source range and flag.
+      chunk's own content, and add the prepended **prefix** source range and flag — not a
+      header range: the prefix may be markup alone, header rows, or a row the rendering
+      requires that the provider did not mark as a header.
 - [ ] 4.4 Record the composed text's length on `Chunk` and `ChunkIndex` when the chunk is
       created, and persist it — `list_chunks` serves a paginated listing from index rows
       carrying only `text_preview`, so it cannot recompute a length without a blob fetch per
@@ -57,23 +59,28 @@
       single oversized row group is emitted whole. Note that *every* fragment carries the
       prefix, including for a table with no header cells — the prefix is what the rendering
       puts before the first body row, not a header, and for some forms it is never empty.
-- [ ] 5.2 The same document rendered as HTML and as pipe tables produces identical chunk
-      boundaries and metadata — the provider-independence claim, as a test.
+- [ ] 5.2 The same document rendered as HTML and as pipe tables obeys the same rules — no
+      cut inside a row, no cut inside a merged-row group, every piece a fragment, same
+      metadata semantics. Do **not** assert identical boundaries: `chunk_size` is a budget
+      on text length, and an HTML row runs about 2.6× a pipe row, so the HTML form yields
+      more pieces cut at different rows. A test asserting equality here would be wrong and
+      would have to be weakened later.
 - [ ] 5.3 `chunk_document` tests: on both the block-list path and the fallback path, every
       chunk's `start_char`/`end_char` delimit a valid range of `extracted_text` covering the
       content that chunk derives from — which is *not* the same as equalling the chunk's
       text. Whether the text equals that slice is a separate property, true for prose and
-      deliberately false for a table piece carrying a repeated header; 5.7 asserts both
+      deliberately false for a table piece carrying a repeated prefix; 5.7 asserts both
       cases. This task must not be written as "the offsets reconstruct the chunk".
 - [ ] 5.4 Both chunker adapters produce the same table chunks for the same input.
 - [ ] 5.5 A regression for the defect that motivated this: a table larger than the chunk
       size must not produce a single chunk exceeding it.
 - [ ] 5.6 A split table yields no whole-table chunk, every row appears in exactly one piece,
       and all pieces share one `table_id` with distinct row ranges.
-- [ ] 5.7 Offsets: a prose chunk's text equals the slice at its offsets; a table piece with a
-      repeated header does not, and records the header's source range and the flag instead.
-- [ ] 5.7a `list_chunks` reports the recorded length for a table piece carrying a repeated
-      header, and reads no blobs while doing so.
+- [ ] 5.7 Offsets: a prose chunk's text equals the slice at its offsets; a table piece
+      carrying a prefix does not, and records the prefix's source range and the flag instead.
+      Cover a pipe-table piece whose prefix is a row the provider did not mark as a header.
+- [ ] 5.7a `list_chunks` reports the recorded length for a table piece carrying a prefix,
+      and reads no blobs while doing so.
 - [ ] 5.8 A table with a cell spanning rows is never cut between those rows.
 - [ ] 5.8a A table with no header, rendered in a form that requires a header line: every
       piece still parses as a table in that form.
@@ -91,5 +98,6 @@
 
 ## 7. Docs
 
-- [ ] 7.1 Document the chunking rules for tables in `docs/`, including the header repetition
-      and its token cost.
+- [ ] 7.1 Document the chunking rules for tables in `docs/`, including the repeated prefix
+      and its token cost, and that boundaries depend on the rendering's length while the
+      rules do not.

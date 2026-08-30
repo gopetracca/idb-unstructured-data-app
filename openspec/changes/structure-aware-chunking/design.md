@@ -25,7 +25,7 @@ prose regions to the chunker, and handles table regions itself.
 The alternative, teaching each adapter about tables, is what produced the current
 asymmetry between the two adapters.
 
-## Decision: split between rows, repeat the header
+## Decision: split between rows, repeat the prefix
 
 When a table exceeds the chunk size:
 
@@ -51,7 +51,7 @@ mid-row. Cutting inside a row destroys the value-to-column association, which is
 thing that makes the row worth retrieving; an oversized chunk is a budget problem, a
 mangled row is a correctness problem. The case is logged so it is visible.
 
-**Header repetition costs tokens.** A ten-piece split of a table with a three-row header
+**Repeating the prefix costs tokens.** A ten-piece split of a table with a three-row header
 embeds that header ten times. That is the intended trade: the alternative is nine pieces
 whose columns are anonymous.
 
@@ -59,8 +59,8 @@ whose columns are anonymous.
 
 `Chunk.start_char` / `end_char` are described today as "position in source text", and for
 every chunk the pipeline currently produces, `text == extracted_text[start_char:end_char]`.
-Repeating the header breaks that: a piece holding rows 40–60 has text that begins with rows
-that live elsewhere in the source. The offsets can no longer be both a provenance record
+Repeating the prefix breaks that: a piece holding rows 40–60 has text that begins with
+content that lives elsewhere in the source. The offsets can no longer be both a provenance record
 and a slice instruction.
 
 They become provenance. `start_char` / `end_char` delimit the range the chunk's **own rows**
@@ -71,7 +71,7 @@ was given, and a flag saying it carries one.
 
 This has one consumer today, and fixing it is not as simple as it first looks.
 `list_chunks.py` computes `char_count = end_char - start_char`, which under-reports any
-piece carrying a repeated header. But it cannot recompute the length from the text: it
+piece carrying a repeated prefix. But it cannot recompute the length from the text: it
 serves a paginated listing from `ChunkIndex` rows in SQL, which carry `text_preview` — a
 truncation — and never read the chunk blobs. "Derive it from the text" would turn one
 indexed query into a blob fetch per chunk on every page of every listing.
@@ -84,7 +84,7 @@ The backfill is exact rather than approximate: every chunk that exists today is 
 slice, so `end_char - start_char` *is* its length, and the migration can set the new column
 from the existing offsets with no re-chunking.
 
-The alternative — keeping offsets exact by not repeating the header — sacrifices the
+The alternative — keeping offsets exact by not repeating the prefix — sacrifices the
 property that makes a piece independently interpretable, which is the point of the change.
 The other alternative — storing the composed text's own offsets — is meaningless, since the
 composed text exists nowhere but in the chunk.
@@ -92,10 +92,30 @@ composed text exists nowhere but in the chunk.
 **Two properties, easily conflated.** "The offsets delimit a valid range of the source" and
 "the chunk's text equals the text at those offsets" are different claims. The first holds
 for every chunk; the second holds for prose and is deliberately false for a table piece
-carrying a repeated header. Anything written as "offsets resolve against the extracted
+carrying a repeated prefix. Anything written as "offsets resolve against the extracted
 text" is ambiguous between them and should be avoided — an earlier draft of the test tasks
 carried exactly that phrasing and contradicted this decision three lines above where it was
 stated.
+
+## Decision: provider independence is about the rules, not the boundaries
+
+An earlier draft required that the same document rendered as HTML and as pipe tables
+produce *identical* chunk boundaries. That is not achievable and should not be attempted.
+`chunk_size` is a budget on text length — the existing spec gives it in characters, 512 by
+default — and the two renderings do not have the same length. Measured on the sample used
+in `preserve-full-extraction-output`, one data row is `<tr>\n<td>2025</td>\n<td>980</td>\n</tr>`
+in HTML and `| 2025 | 980 |` as a pipe row: 37 characters against 14, a factor of 2.6. With
+a fixed budget the HTML form necessarily yields more pieces, cut at different rows.
+
+What is provider-independent is the *rules*: no cut inside a row, no cut inside a group of
+rows joined by a merged cell, every piece composed as a fragment, the same metadata
+recorded, and no rule phrased in terms of either syntax. What legitimately varies is how
+many pieces result and which rows share one.
+
+This has a consequence worth stating plainly: **changing extractor changes chunk shapes**,
+and therefore retrieval, even for identical documents. That is inherent in embedding text
+whose length depends on its rendering, not something this design introduces — but a team
+switching providers should expect to re-chunk and re-measure rather than assume parity.
 
 ## Decision: measure retrieval rather than assert it
 
@@ -148,5 +168,5 @@ Two consequences follow, and both are stated as requirements rather than left im
   comparing their text.
 
 Reassembling a split table — for a consumer that wants the whole thing — is therefore
-ordering the pieces by row range and dropping the repeated header from all but the first.
+ordering the pieces by row range and dropping the repeated prefix from all but the first.
 That is a consumer-side concern and needs nothing this stage does not already record.
