@@ -141,10 +141,16 @@ class CoordinateOrigin(StrEnum):
 class BoundingBox(BaseModel):
     """Where something sits on a page, with the units it is measured in.
 
-    Document Intelligence reports inches from a top-left origin; Docling reports points
-    and can use either origin. Neither is converted on the way in: ``unit`` and ``origin``
-    are recorded so that a consumer comparing geometry across documents can check them,
-    rather than silently comparing incompatible numbers.
+    Document Intelligence reports a top-left origin in the unit the *page* declares —
+    inches for a PDF or an Office document, pixels for an image; Docling reports points and
+    can use either origin. Nothing is converted on the way in: ``unit`` and ``origin`` are
+    recorded so that a consumer comparing geometry across documents can check them, rather
+    than silently comparing incompatible numbers.
+
+    That the unit varies *within* one provider is the point. Inches and pixels are both
+    small positive floats, so a box labelled with the wrong one looks entirely plausible
+    and no consumer can tell — which is why the label is read from the page rather than
+    decided by whoever wrote the adapter.
     """
 
     page_number: int = Field(..., ge=1, description="1-indexed page the box is on")

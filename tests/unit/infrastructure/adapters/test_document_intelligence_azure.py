@@ -672,6 +672,126 @@ class TestCanonicalBlocks:
         assert box.unit is CoordinateUnit.INCH
         assert box.origin is CoordinateOrigin.TOP_LEFT
 
+    async def test_geometry_on_an_image_document_is_reported_in_pixels(
+        self, mock_document_intelligence_settings
+    ):
+        """An image page is measured in pixels, and the box has to say so.
+
+        PNG, JPEG, TIFF and BMP are all supported inputs, and for every one of them the
+        service reports page geometry in pixels rather than inches. Labelling those
+        coordinates `inch` would be the exact silent mis-comparison that putting `unit` on
+        the box exists to prevent — and no consumer could tell.
+        """
+        markdown = "Scanned heading"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [
+                    {
+                        "pageNumber": 1,
+                        "width": 1700.0,
+                        "height": 2200.0,
+                        "unit": "pixel",
+                        "angle": 0.0,
+                    }
+                ],
+                "paragraphs": [
+                    {
+                        "content": markdown,
+                        "role": "title",
+                        "spans": [{"offset": 0, "length": len(markdown)}],
+                        "boundingRegions": [
+                            {
+                                "pageNumber": 1,
+                                "polygon": [120.0, 90.0, 1580.0, 90.0, 1580.0, 210.0, 120.0, 210.0],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        box = output.blocks[0].bounding_box
+
+        assert output.pages[0].unit == "pixel"
+        assert box is not None
+        assert box.unit is CoordinateUnit.PIXEL
+        assert box.origin is CoordinateOrigin.TOP_LEFT
+        assert (box.left, box.top, box.right, box.bottom) == (120.0, 90.0, 1580.0, 210.0)
+
+    async def test_the_unit_is_read_per_page_not_decided_once(
+        self, mock_document_intelligence_settings
+    ):
+        """The service reports the unit per page, so the adapter reads it per page."""
+        markdown = "Page one\n\nPage two"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [
+                    {"pageNumber": 1, "unit": "inch", "width": 8.5, "height": 11.0},
+                    {"pageNumber": 2, "unit": "pixel", "width": 1700.0, "height": 2200.0},
+                ],
+                "paragraphs": [
+                    {
+                        "content": "Page one",
+                        "spans": [{"offset": 0, "length": 8}],
+                        "boundingRegions": [
+                            {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}
+                        ],
+                    },
+                    {
+                        "content": "Page two",
+                        "spans": [{"offset": 10, "length": 8}],
+                        "boundingRegions": [
+                            {
+                                "pageNumber": 2,
+                                "polygon": [10.0, 10.0, 900.0, 10.0, 900.0, 80.0, 10.0, 80.0],
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+
+        assert [block.bounding_box.unit for block in output.blocks] == [
+            CoordinateUnit.INCH,
+            CoordinateUnit.PIXEL,
+        ]
+        assert [block.page_number for block in output.blocks] == [1, 2]
+
+    @pytest.mark.parametrize("page", [{"pageNumber": 1}, {"pageNumber": 1, "unit": "furlong"}])
+    async def test_a_unit_the_model_cannot_name_yields_no_box(
+        self, mock_document_intelligence_settings, page
+    ):
+        """A guessed unit is worse than no geometry, because nothing marks it as guessed.
+
+        The block itself survives — its range and page are still true — so a consumer
+        loses the rectangle, not the element.
+        """
+        markdown = "Heading"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [page],
+                "paragraphs": [
+                    {
+                        "content": markdown,
+                        "role": "title",
+                        "spans": [{"offset": 0, "length": 7}],
+                        "boundingRegions": [
+                            {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}
+                        ],
+                    }
+                ],
+            },
+        )
+
+        assert output.blocks[0].bounding_box is None
+        assert output.blocks[0].text_in(output.extracted_text) == "Heading"
+        assert output.blocks[0].page_number == 1
+
     async def test_provider_references_are_preserved_verbatim(self, output):
         """`/paragraphs/8` is opaque: kept exactly, interpreted by nobody."""
         figure_block = next(b for b in output.blocks if b.kind is BlockKind.FIGURE)

@@ -1123,8 +1123,13 @@ a contract, not a convention, and it is written down in
   such rows together rather than losing the content silently.
 - **Geometry records its units.** A `bounding_box` carries `unit` (`inch`, `point`,
   `pixel`) and `origin` (`top_left`, `bottom_left`) rather than being converted, so nothing
-  compares inches against points by accident. Document Intelligence reports inches from a
-  top-left origin.
+  compares inches against points by accident. Document Intelligence measures from a
+  top-left origin in whatever unit the *page* reports: **inches for a PDF or an Office
+  document, pixels for an image** (PNG, JPEG, TIFF, BMP). The unit is read per page, not
+  assumed — a scanned page's coordinates run to the thousands and would describe a document
+  yards across if published as inches, while looking perfectly ordinary. Where the service
+  reports no unit the box is omitted rather than guessed, because a consumer cannot tell a
+  guessed label from a true one.
 - **Cross-references are opaque.** `elements` holds the provider's own references
   (`/paragraphs/2`, `#/texts/2`) verbatim, and no consumer interprets their format.
 
@@ -1138,7 +1143,7 @@ The mapping each provider takes onto this model:
 | Element kind | `paragraphs[].role` (`title`, `sectionHeading`, `pageHeader`, …) | `DocItemLabel` (`title`, `section_header`, `caption`, `list_item`, …) | `blocks[].kind`, with the provider's role kept in `blocks[].role` |
 | Cell position | `rowIndex`, `columnIndex`, `rowSpan`, `columnSpan` | `start_row_offset_idx`, `end_row_offset_idx`, `row_span`, `col_span` | `row_index`, `column_index`, `row_span`, `column_span` |
 | Header cells | `kind: columnHeader \| rowHeader \| stubHead` | `column_header`, `row_header`, `row_section` booleans | `cells[].role`, and `header_rows` derived from it |
-| Geometry | `boundingRegions[].polygon`, inches, top-left | `prov[].bbox` with `CoordOrigin`, points | `bounding_box` with `unit` and `origin`, polygon kept |
+| Geometry | `boundingRegions[].polygon`, top-left, in the page's unit (inch for PDF, pixel for images) | `prov[].bbox` with `CoordOrigin`, points | `bounding_box` with `unit` and `origin`, polygon kept |
 | Cross-references | `elements: ["/paragraphs/2"]` | `$ref: "#/texts/2"` | `elements`, opaque |
 
 `Document Intelligence`'s `kind: description` has no canonical twin and maps to `content`;

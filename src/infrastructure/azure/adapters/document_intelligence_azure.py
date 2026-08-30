@@ -88,11 +88,18 @@ def _caption_content(caption) -> str | None:
     return getattr(caption, "content", None)
 
 
-# Document Intelligence measures every polygon in inches from the page's top-left corner.
-# The canonical box records that rather than assuming it, so a provider using points or a
-# bottom-left origin cannot be silently compared against one of these.
-_DI_COORDINATE_UNIT = CoordinateUnit.INCH
+# Document Intelligence measures polygons from the page's top-left corner, in the unit the
+# page itself declares — inches for a PDF or an Office document, **pixels for an image**.
+# So the unit is read per page rather than assumed: labelling a scanned PNG's pixel
+# coordinates as inches is exactly the silent, uncheckable comparison that putting `unit`
+# on the canonical box exists to prevent.
 _DI_COORDINATE_ORIGIN = CoordinateOrigin.TOP_LEFT
+
+_DI_PAGE_UNITS: dict[str, CoordinateUnit] = {
+    "inch": CoordinateUnit.INCH,
+    "pixel": CoordinateUnit.PIXEL,
+    "point": CoordinateUnit.POINT,
+}
 
 # Paragraph roles that make a paragraph a heading. Every other role — pageHeader,
 # pageFooter, footnote, formulaBlock, or none at all — is a paragraph, and the service's
@@ -100,11 +107,30 @@ _DI_COORDINATE_ORIGIN = CoordinateOrigin.TOP_LEFT
 _HEADING_ROLES = {"title", "sectionHeading"}
 
 
-def _bounding_box(regions) -> BoundingBox | None:
+def _page_units(result: AnalyzeResult) -> dict[int, CoordinateUnit]:
+    """The coordinate unit each analysed page reports, keyed by its page number.
+
+    A document is not one unit throughout in principle — the service reports the unit per
+    page — so this is read per page rather than decided once for the response.
+    """
+    units: dict[int, CoordinateUnit] = {}
+    for index, page in enumerate(getattr(result, "pages", None) or [], start=1):
+        unit = _DI_PAGE_UNITS.get((_enum_value(getattr(page, "unit", None)) or "").lower())
+        if unit is not None:
+            units[getattr(page, "page_number", None) or index] = unit
+    return units
+
+
+def _bounding_box(regions, page_units: dict[int, CoordinateUnit]) -> BoundingBox | None:
     """Build a canonical box from the first bounding region the service supplied.
 
     The first region is the element's own page: an element crossing a page boundary gets
     several, and a box that merged them would describe a rectangle on no page at all.
+
+    A page whose unit the service did not report, or reported as something this model
+    cannot name, yields no box at all. That loses geometry, and it is the right trade:
+    `unit` exists so that nothing compares incompatible numbers, and a box carrying a
+    guessed unit is worse than no box, because a consumer cannot tell it was guessed.
     """
     for region in regions or []:
         polygon = list(getattr(region, "polygon", None) or [])
@@ -112,13 +138,20 @@ def _bounding_box(regions) -> BoundingBox | None:
         ys = polygon[1::2]
         if not xs or not ys:
             continue
+        unit = page_units.get(region.page_number)
+        if unit is None:
+            logger.debug(
+                "Dropping geometry on page %s: the service reported no unit this model names",
+                region.page_number,
+            )
+            return None
         return BoundingBox(
             page_number=region.page_number,
             left=min(xs),
             top=min(ys),
             right=max(xs),
             bottom=max(ys),
-            unit=_DI_COORDINATE_UNIT,
+            unit=unit,
             origin=_DI_COORDINATE_ORIGIN,
             polygon=polygon,
         )
@@ -593,6 +626,7 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
         """
         enclosing: list[tuple[int, int]] = []
         blocks: list[ContentBlock] = []
+        page_units = _page_units(result)
 
         for index, table in enumerate(result.tables or []):
             extent = _span_range(getattr(table, "spans", None), extracted_text)
@@ -606,7 +640,7 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
                     start=extent[0],
                     end=extent[1],
                     page_number=_first_page(regions),
-                    bounding_box=_bounding_box(regions),
+                    bounding_box=_bounding_box(regions, page_units),
                     # Without this a consumer can see that a region is a table and still
                     # not reach the renderings it needs to emit part of one.
                     table_index=index,
@@ -627,7 +661,7 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
                     start=extent[0],
                     end=extent[1],
                     page_number=_first_page(regions),
-                    bounding_box=_bounding_box(regions),
+                    bounding_box=_bounding_box(regions, page_units),
                     elements=list(getattr(figure, "elements", None) or []),
                 )
             )
@@ -644,7 +678,7 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
                     start=extent[0],
                     end=extent[1],
                     page_number=_first_page(regions),
-                    bounding_box=_bounding_box(regions),
+                    bounding_box=_bounding_box(regions, page_units),
                     # The narrowing to a canonical kind is lossy; the service's own role
                     # rides along so a consumer that cares about pageFooter can still see it.
                     role=role,

@@ -27,7 +27,13 @@ import json
 import pytest
 
 from src.config.settings import get_settings
-from src.core.entities.document_analysis import BlockKind, CellRole, MarkdownOutput
+from src.core.entities.document_analysis import (
+    BlockKind,
+    CellRole,
+    CoordinateOrigin,
+    CoordinateUnit,
+    MarkdownOutput,
+)
 from src.infrastructure.azure.adapters.document_intelligence_azure import (
     AzureDocumentIntelligenceAdapter,
 )
@@ -43,7 +49,13 @@ from tests.support.extractor_contract import (
     assert_satisfies_the_extraction_contract,
     assert_table_blocks_resolve_to_a_table,
 )
-from tests.support.sample_documents import BODY, HEADING, TABLE_ROWS, build_sample_pdf
+from tests.support.sample_documents import (
+    BODY,
+    HEADING,
+    TABLE_ROWS,
+    build_sample_image,
+    build_sample_pdf,
+)
 from tests.support.table_reconstruction import assert_cells_tile_grid, assert_spans_resolve
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_azure_di]
@@ -281,6 +293,102 @@ class TestLiveOutputSatisfiesTheCanonicalContract:
 
         assert_satisfies_the_extraction_contract(restored)
         assert len(restored.blocks) == len(live_output.blocks)
+
+
+@pytest.fixture(scope="module")
+def sample_image() -> bytes:
+    return build_sample_image()
+
+
+@pytest.fixture(scope="module")
+def live_image_output(sample_image: bytes) -> MarkdownOutput:
+    """Analyse the same document as a PNG. Module-scoped: it bills one more analysis.
+
+    Worth the second call because the unit a page is measured in is not visible in the
+    coordinates — inches and pixels are both small positive floats — so an adapter
+    labelling one as the other can only be caught by analysing both.
+    """
+    settings = get_settings().document_intelligence
+    adapter = AzureDocumentIntelligenceAdapter(settings=settings)
+    try:
+        return asyncio.run(
+            adapter.analyze_document(
+                document_content=sample_image,
+                content_type="image/png",
+                file_id="live-extraction-image-test",
+                file_version=1,
+            )
+        )
+    finally:
+        adapter.close()
+
+
+class TestLiveImageGeometryIsNotReportedInInches:
+    """An image page is measured in pixels; a PDF page in inches.
+
+    The adapter used to label every polygon `inch`. On a PDF that is right and on a PNG it
+    is wrong by three orders of magnitude, while the numbers themselves look equally
+    plausible — which is the whole reason the canonical box carries its unit.
+    """
+
+    def test_the_service_reports_the_page_in_pixels(self, live_image_output: MarkdownOutput):
+        page = live_image_output.pages[0]
+
+        assert page.unit == "pixel"
+        assert page.width and page.width > 100
+
+    def test_every_block_box_says_pixel(self, live_image_output: MarkdownOutput):
+        boxes = [b.bounding_box for b in live_image_output.blocks if b.bounding_box]
+
+        assert boxes, "the image yielded no geometry at all"
+        for box in boxes:
+            assert box.unit is CoordinateUnit.PIXEL
+            assert box.origin is CoordinateOrigin.TOP_LEFT
+
+    def test_the_coordinates_are_pixels_and_could_not_be_inches(
+        self, live_image_output: MarkdownOutput
+    ):
+        """The decisive check: as inches these would describe a page yards across."""
+        page = live_image_output.pages[0]
+        widest = max(
+            b.bounding_box.right for b in live_image_output.blocks if b.bounding_box
+        )
+
+        assert widest > 100, "a coordinate this small would be indistinguishable from inches"
+        assert widest <= page.width
+
+    def test_the_same_document_as_a_pdf_reports_inches(
+        self, live_image_output: MarkdownOutput, live_output: MarkdownOutput
+    ):
+        """The two together are the assertion; either alone would have passed the bug."""
+        pdf_units = {b.bounding_box.unit for b in live_output.blocks if b.bounding_box}
+        image_units = {b.bounding_box.unit for b in live_image_output.blocks if b.bounding_box}
+
+        assert pdf_units == {CoordinateUnit.INCH}
+        assert image_units == {CoordinateUnit.PIXEL}
+
+    def test_the_contract_holds_for_the_image_too(self, live_image_output: MarkdownOutput):
+        """Everything else the contract asks for, on a scanned document rather than a PDF."""
+        assert live_image_output.blocks
+        assert_satisfies_the_extraction_contract(live_image_output)
+
+    def test_a_table_the_service_marked_with_no_header_still_partitions(
+        self, live_image_output: MarkdownOutput
+    ):
+        """The image's table comes back as `<td>` throughout, so it has no header rows.
+
+        The prefix then carries nothing and every row is a body row — and the exactness
+        rule still has to hold, which is the case a prefix defined as "markup plus header
+        rows" would get wrong.
+        """
+        assert live_image_output.tables, "the service found no table in the image"
+        table = live_image_output.tables[0]
+
+        assert table.rows
+        assert table.fragment() == table.rendered
+        if not table.header_rows:
+            assert table.prefix_row_indices == []
+            assert [row.row_index for row in table.rows] == list(range(len(table.rows)))
 
 
 class TestLiveRawAnalysisIsLossless:
