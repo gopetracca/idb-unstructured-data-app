@@ -135,7 +135,7 @@ are the same regardless of which service produced them.
 
 ## MODIFIED Requirements
 
-### Requirement: Structural Layout Elements In Text Output
+### Requirement: Structured Layout Elements In Text Output
 
 The extracted-text output SHALL carry the document's structural elements alongside the
 markdown — tables, figures, paragraphs with their roles, sections, styles, key-value
