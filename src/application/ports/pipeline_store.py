@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from src.core.entities.composites import DocumentWithPipeline
+from src.core.entities.document import ReplacedBlobReferences
 from src.core.entities.pipeline_state import OverallStatus, PipelineState, ProcessingStage
 
 
@@ -67,8 +68,21 @@ class PipelineStorePort(Protocol):
         file_id: str,
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
-    ) -> None:
-        """Update blob storage references for a file (on the files table)."""
+        analysis_blob_ref: str | None = None,
+        clear_analysis_blob_ref: bool = False,
+    ) -> ReplacedBlobReferences:
+        """Update blob storage references for a file (on the files table).
+
+        Returns the references this update overwrote, so the caller can clean up exactly
+        what it displaced. Reading them beforehand is not equivalent: a concurrent
+        extraction of the same document may publish in between, and then both runs would
+        sweep the same outputs and neither would sweep the loser's.
+
+        A `None` reference means "leave it alone", so re-running a stage cannot wipe a
+        path it did not produce. Clearing is therefore explicit: pass
+        `clear_analysis_blob_ref=True` when a run deliberately produced no raw analysis,
+        so the row cannot keep pointing at an earlier run's sidecar.
+        """
         ...
 
     async def query_by_status(

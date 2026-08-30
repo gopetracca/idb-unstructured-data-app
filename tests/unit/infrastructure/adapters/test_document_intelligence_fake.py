@@ -6,6 +6,9 @@ from src.core.errors import DocumentProcessingError, UnsupportedFormatError
 from src.infrastructure.azure.adapters.document_intelligence_fake import (
     FakeDocumentIntelligenceAdapter,
 )
+from tests.support.table_reconstruction import assert_cells_tile_grid, assert_spans_resolve
+
+pytestmark = pytest.mark.unit
 
 
 class TestFakeDocumentIntelligenceAdapter:
@@ -229,3 +232,103 @@ class TestFakeDocumentIntelligenceAdapter:
 
         assert "世界" in result.extracted_text
         assert "émojis" in result.extracted_text
+
+
+class TestFakeAdapterStructuralParity:
+    """The fake emits the same enriched shape as the real adapter.
+
+    Without this, `DOCUMENT_INTELLIGENCE_USE_FAKE=true` would give local runs and tests a
+    document with no structure at all — and the table-handling code downstream would have
+    nothing to run against until it reached Azure.
+    """
+
+    async def test_fake_emits_a_reconstructible_table(
+        self, fake_document_intelligence_adapter, sample_file_id
+    ):
+        result = await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+
+        assert len(result.tables) == 1
+        table = result.tables[0]
+        assert_cells_tile_grid(table)
+        assert table.to_grid() == [
+            ["Simulated Table", "Simulated Table"],
+            ["Field", "Value"],
+            ["File ID", sample_file_id],
+        ]
+
+    async def test_fake_table_has_a_header_row_and_a_merged_cell(
+        self, fake_document_intelligence_adapter, sample_file_id
+    ):
+        """The two cases rendered markdown alone cannot round-trip."""
+        result = await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+        table = result.tables[0]
+
+        assert table.cells[0].column_span == 2
+        assert [c.kind for c in table.cells if c.row_index == 1] == [
+            "columnHeader",
+            "columnHeader",
+        ]
+
+    async def test_fake_spans_resolve_against_its_own_markdown(
+        self, fake_document_intelligence_adapter, sample_file_id
+    ):
+        """The fake's spans have to be internally consistent to be worth testing against."""
+        result = await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+
+        assert_spans_resolve(result.tables[0], result.extracted_text)
+        for paragraph in result.paragraphs:
+            span = paragraph.spans[0]
+            assert (
+                result.extracted_text[span.offset : span.offset + span.length]
+                == paragraph.content
+            )
+
+    async def test_fake_emits_paragraph_roles_and_page_lines(
+        self, fake_document_intelligence_adapter, sample_file_id
+    ):
+        result = await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+
+        assert result.paragraphs[0].role == "title"
+        assert result.pages[0].lines
+        assert result.pages[0].unit == "inch"
+
+    async def test_fake_metadata_reports_what_it_emitted(
+        self, fake_document_intelligence_adapter, sample_file_id
+    ):
+        result = await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+
+        assert result.extraction_metadata.table_count == 1
+        assert result.extraction_metadata.paragraph_count == len(result.paragraphs)
+
+    async def test_fake_has_no_raw_analysis_to_offer(
+        self, fake_document_intelligence_adapter, sample_file_id
+    ):
+        """Inventing a service response would make `raw_analysis_stored` lie."""
+        result = await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+
+        assert result.raw_analysis is None
+        assert result.extraction_metadata.raw_analysis_stored is False

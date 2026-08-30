@@ -10,9 +10,16 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
 #### Scenario: Raw analysis stored verbatim
 
 - **WHEN** extraction succeeds and `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` is true
-- **THEN** the service response is serialised without filtering and written to
-  `{tenant_id}/{file_id}/analysis.json` in the output container, and the document's
-  `analysis_blob_ref` is set to that path before the stage reports success
+- **THEN** the service response is serialised without filtering and written under
+  `{tenant_id}/{file_id}/analysis/` in the output container at a path unique to that run,
+  and the document's `analysis_blob_ref` is set to that path before the stage reports
+  success
+
+#### Scenario: A run never overwrites another run's raw analysis
+
+- **WHEN** a document that already has a stored raw analysis is extracted again
+- **THEN** the new response is written to a different path, and the previous one remains
+  readable until the reference has moved past it
 
 #### Scenario: Fields unknown to the domain model survive
 
@@ -30,6 +37,26 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
 - **WHEN** writing `analysis.json` raises
 - **THEN** the failure is logged as a warning, `extraction_metadata.raw_analysis_stored` is
   false, and the extraction result and its `202` response are unchanged
+
+#### Scenario: Text output fails to store after the raw analysis was written
+
+- **WHEN** the raw analysis has been written and the subsequent `text.json` write fails
+- **THEN** the last completed extraction is unchanged — its `text.json`, its raw analysis
+  and its blob references all still describe each other — the failed run's raw analysis is
+  discarded because nothing references it, and the original failure is the error that
+  surfaces
+
+#### Scenario: Recording the references fails
+
+- **WHEN** both outputs have been stored and recording the blob references then fails
+- **THEN** the last completed extraction is still published and still matched, this run's
+  outputs are discarded because nothing references them, and the failure is reported
+
+#### Scenario: Superseded outputs are not kept
+
+- **WHEN** a re-extraction completes and the references move to its outputs
+- **THEN** the text output and raw analysis the references pointed at before are deleted,
+  since nothing can reach them any more
 
 #### Scenario: Document extracted before this capability existed
 
@@ -124,7 +151,7 @@ consumers written against the previous output shape.
 #### Scenario: Successful extraction
 
 - **WHEN** `POST /api/v1/contents` is called with `documents.write` and a `file_id` whose raw blob exists and whose content type is supported
-- **THEN** the document is analysed, the markdown output plus structural elements plus extraction metadata is written to `{tenant_id}/{file_id}/text.json` in the output container, and the response is `202` carrying `file_id`, `status`, `markdown_url`, `correlation_id`, and `processing_time_ms`
+- **THEN** the document is analysed, the markdown output plus structural elements plus extraction metadata is written under `{tenant_id}/{file_id}/text/` in the output container at a path unique to that run, and the response is `202` carrying `file_id`, `status`, `markdown_url`, `correlation_id`, and `processing_time_ms`
 
 #### Scenario: Existing output fields keep their meaning
 

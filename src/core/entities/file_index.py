@@ -56,6 +56,10 @@ class FileIndex(BaseModel):
         default=None,
         description="Blob storage path for extracted text (e.g., tenant_id/file_id/text.json)",
     )
+    analysis_blob_ref: str | None = Field(
+        default=None,
+        description="Blob storage path for the verbatim extraction-service response",
+    )
 
     # Processing state
     current_stage: ProcessingStage = Field(

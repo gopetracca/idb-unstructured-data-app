@@ -153,6 +153,15 @@ class DocumentIntelligenceSettings(BaseSettings):
         description="Simulated processing delay for fake adapter",
     )
 
+    # Persist the verbatim service response beside the extracted text. On by default:
+    # re-running extraction is the most expensive operation in the pipeline, so the one
+    # copy of the full analysis is worth its blob volume. Turn off where volume matters —
+    # the structural elements in text.json are populated either way.
+    persist_raw_result: bool = Field(
+        default=True,
+        description="Store the verbatim Document Intelligence response as analysis.json",
+    )
+
     # Whether to run integration tests that call the real Azure service.
     # Use values like "on"/"1"/"true"/"yes" to enable, or "off"/"0"/"false"/"no" to disable.
     # Default is "off" to avoid running external calls during normal test runs.

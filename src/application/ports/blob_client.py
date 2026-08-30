@@ -26,6 +26,10 @@ class BlobClientPort(Protocol):
         """Check if a blob exists."""
         ...
 
+    async def delete_blob(self, container: str, blob_path: str) -> bool:
+        """Delete a blob."""
+        ...
+
     async def list_blobs(
         self,
         container: str,

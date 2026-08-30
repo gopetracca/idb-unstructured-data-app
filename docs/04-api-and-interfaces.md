@@ -952,7 +952,7 @@ Extract text content from a document using Azure Document Intelligence.
 {
   "file_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "completed",
-  "markdown_url": "text/550e8400-e29b-41d4-a716-446655440000/text.json",
+  "markdown_url": "text/default/550e8400-e29b-41d4-a716-446655440000/text/9f2c1b7e.json",
   "correlation_id": "abc-123-def",
   "processing_time_ms": 1500,
   "created_at": "2026-01-30T10:00:00Z"
@@ -979,6 +979,148 @@ curl -X POST "https://{app}.azurewebsites.net/api/v1/contents" \
 - `400` - Invalid request or unsupported format
 - `404` - Document not found
 - `500` - Internal server error
+
+#### Extraction artifacts
+
+The stage writes two blobs to the output container and records both paths on the document
+row, which stays the source of truth for where content lives.
+
+| Blob | Column | Contents |
+| --- | --- | --- |
+| `{tenant_id}/{file_id}/text/{run}.json` | `text_blob_ref` | The typed extraction output consumed by the pipeline |
+| `{tenant_id}/{file_id}/analysis/{run}.json` | `analysis_blob_ref` | The Document Intelligence response, verbatim |
+
+Both paths carry a per-run component and **neither can be reconstructed** — the two columns
+are the only way to locate either blob. That is what makes publication atomic: a run writes
+its outputs where nothing else can see them, then records both references in a single
+update. Until that update lands the document still resolves to the previous extraction, so
+a run that fails anywhere — including in the reference update itself — leaves the last
+completed extraction published, matched, and whole. Outputs a run abandons, and outputs a
+newer run supersedes, are deleted; if a delete fails the blob is orphaned but unreachable,
+and `delete_document` sweeps it with the document's prefix.
+
+It also means two overlapping extractions cannot interleave into a mixed result: whichever
+commits last wins both columns together, so the row never names one run's text beside
+another run's analysis.
+
+`text.json` carries the markdown *and* the document's structure. Fields are additive: the
+original `extracted_text`, `pages[].text`, `pages[].word_count` and `extraction_metadata`
+keep their meaning, so consumers written against the earlier shape (the chunker reads
+`extracted_text` only) are unaffected.
+
+```jsonc
+{
+  "file_id": "550e8400-...",
+  "extracted_text": "# Quarterly Report\n\n| Budget Summary ||\n...",  // markdown
+  "content_format": "markdown",
+  "model_id": "prebuilt-layout",
+  "pages": [
+    {
+      "page_number": 1,
+      "text": "Quarterly Report The table below ...",   // words joined by spaces; lossy
+      "word_count": 42,
+      "width": 8.5, "height": 11.0, "unit": "inch", "angle": 0.0,
+      "lines": [{"content": "Quarterly Report", "spans": [{"offset": 2, "length": 16}]}],
+      "words": [{"content": "Quarterly", "confidence": 0.99, "span": {"offset": 2, "length": 9}}],
+      "selection_marks": []
+    }
+  ],
+  "tables": [
+    {
+      "row_count": 4, "column_count": 2,
+      "caption": "Table 1. Budget by year",
+      "footnotes": ["Amounts in thousands."],
+      "cells": [
+        {
+          "row_index": 0, "column_index": 0,
+          "row_span": 1, "column_span": 2,           // merged title cell
+          "kind": "columnHeader",
+          "content": "Budget Summary",
+          "spans": [{"offset": 24, "length": 14}],
+          "bounding_regions": [{"page_number": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}]
+        }
+        // ... one entry per cell
+      ]
+    }
+  ],
+  "paragraphs": [{"content": "Quarterly Report", "role": "title", "spans": [...]}],
+  "figures": [], "sections": [], "styles": [], "key_value_pairs": [],
+  "extraction_metadata": {
+    "page_count": 1, "word_count": 42,
+    "extraction_confidence": 0.987,
+    "extraction_method": "azure-document-intelligence",
+    "api_version": "2024-11-30",
+    "table_count": 1, "figure_count": 0, "paragraph_count": 6,
+    "raw_analysis_stored": true
+  }
+}
+```
+
+Two things make this usable rather than merely verbose:
+
+- **Cells, not rendered rows.** `row_index`/`column_index` plus `row_span`/`column_span`
+  rebuild the grid exactly, including merged cells — which a rendered markdown table
+  cannot express. `ExtractedTable.to_grid()` does this in code.
+- **Spans are offsets into `extracted_text`.** Any element can be mapped back onto the
+  markdown a chunk was cut from, and `bounding_regions` map it onto the page.
+
+The raw analysis is the service response as received, including fields this API does not
+model. It exists so that a future need — or a newer service version — does not require
+re-analysing the document, which is the most expensive operation in the pipeline.
+
+**Settings:**
+
+- `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` (default `true`) — store the raw analysis.
+  Set it to `false` where blob volume matters. On a one-page table-bearing PDF measured
+  against the real service the raw analysis was 8.8 KB against 9.6 KB for `text.json` — the
+  two are the same order of magnitude, because the typed projection re-states per-page
+  words and lines that the raw response holds once. Expect that ratio to shift with
+  document shape rather than to hold. The structural fields in `text.json` are not gated by
+  this setting.
+
+#### Inspecting extraction output yourself
+
+`scripts/show_extraction_output.py` analyses one document and prints what the stage keeps,
+before and after structural preservation, so the difference can be inspected on a real
+document rather than taken on faith:
+
+```bash
+# Bundled sample: a one-page PDF with a merged-header table
+uv run python scripts/show_extraction_output.py
+
+# Your own document
+uv run python scripts/show_extraction_output.py path/to/document.pdf
+
+# Also write text.json, its pre-change equivalent, and the raw analysis for inspection
+uv run python scripts/show_extraction_output.py --dump-to ./extraction-output
+```
+
+It needs `DOCUMENT_INTELLIGENCE_ENDPOINT` (and `DOCUMENT_INTELLIGENCE_API_KEY` unless the
+resource is reached through managed identity), and bills one analysis per run.
+
+The tests that exercise the same path:
+
+```bash
+# Offline: mapping, table reconstruction, backward compatibility, sidecar behaviour
+uv run pytest -m unit
+
+# Against the real service (billed; one analysis for the whole module)
+DOCUMENT_INTELLIGENCE_RUN_TESTS=on \
+  uv run pytest -m requires_azure_di \
+  tests/integration/infrastructure/test_document_intelligence_live.py
+
+# Against a real SQL Server, started automatically via testcontainers (needs Docker)
+uv run pytest tests/integration/infrastructure/test_analysis_blob_ref_sqlserver.py
+```
+
+The live tests skip themselves when no endpoint is configured, so they are safe to leave in
+a normal run.
+
+A failed raw-analysis write does not fail extraction: the response is still `202`, and the
+loss is visible afterwards as `raw_analysis_stored: false` with a null
+`analysis_blob_ref`. A null `analysis_blob_ref` also means "extracted before the raw
+response was kept" — documents processed before this feature have no sidecar and are not
+backfilled.
 
 ---
 

@@ -296,6 +296,8 @@ class FileIndexRepositorySQLServer:
         file_id: str,
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
+        analysis_blob_ref: str | None = None,
+        clear_analysis_blob_ref: bool = False,
     ) -> FileIndex | None:
         """Update blob storage references for a file (atomic single-session)."""
         async with self._session_factory() as session:
@@ -306,6 +308,12 @@ class FileIndexRepositorySQLServer:
                 row.raw_blob_ref = raw_blob_ref
             if text_blob_ref is not None:
                 row.text_blob_ref = text_blob_ref
+            if analysis_blob_ref is not None:
+                row.analysis_blob_ref = analysis_blob_ref
+            elif clear_analysis_blob_ref:
+                # A re-run that stored no sidecar must not leave the row pointing at the
+                # previous run's analysis.json, which no longer describes this text.json.
+                row.analysis_blob_ref = None
             await session.commit()
             return row.to_file_index()
 
