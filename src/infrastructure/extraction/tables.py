@@ -27,8 +27,10 @@ from src.core.entities.document_analysis import (
     TableRow,
 )
 
-# One `<tr …>` opening tag; Document Intelligence emits no attributes on it today, but a
-# provider that does must not change where the row starts.
+# One `<tr …>` opening tag through its close. Non-greedy, so it stops at the first
+# `</tr>` — which is right for a flat table and would be wrong for a table nested inside a
+# cell. Document Intelligence does not emit those, and a provider that did would need its
+# own partitioner rather than a cleverer regex here.
 _HTML_ROW = re.compile(r"<tr\b[^>]*>.*?</tr\s*>", re.DOTALL | re.IGNORECASE)
 
 # A GitHub-flavoured Markdown delimiter line: only pipes, dashes, colons and spaces, with

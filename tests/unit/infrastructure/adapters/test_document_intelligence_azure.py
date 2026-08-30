@@ -679,6 +679,37 @@ class TestCanonicalBlocks:
         assert figure_block.elements == ["/paragraphs/8"]
         assert output.tables[0].cells[0].elements == ["/paragraphs/2"]
 
+    async def test_a_figure_that_encloses_a_table_does_not_overlap_it(
+        self, mock_document_intelligence_settings
+    ):
+        """Two blocks over the same characters would make reading order ambiguous.
+
+        The table wins, because it is the element a consumer can do something with.
+        """
+        table_html = "<table>\n<tr>\n<td>a</td>\n</tr>\n</table>"
+        markdown = f"<figure>\n{table_html}\n</figure>"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [{"pageNumber": 1}],
+                "tables": [
+                    {
+                        "rowCount": 1,
+                        "columnCount": 1,
+                        "cells": [{"rowIndex": 0, "columnIndex": 0, "content": "a"}],
+                        "spans": [{"offset": markdown.index(table_html), "length": len(table_html)}],
+                    }
+                ],
+                "figures": [
+                    {"id": "1.1", "spans": [{"offset": 0, "length": len(markdown)}]}
+                ],
+            },
+        )
+
+        assert [block.kind for block in output.blocks] == [BlockKind.TABLE]
+        assert_blocks_are_ordered_and_disjoint(output)
+
     async def test_output_written_before_blocks_existed_has_none(
         self, mock_document_intelligence_settings
     ):

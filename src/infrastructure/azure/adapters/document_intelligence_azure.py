@@ -125,6 +125,16 @@ def _bounding_box(regions) -> BoundingBox | None:
     return None
 
 
+def _overlaps(extent: tuple[int, int], ranges: list[tuple[int, int]]) -> bool:
+    """Whether a range shares any character with one already claimed.
+
+    Overlap, not containment: a figure enclosing a table starts *before* it, so a
+    containment test would let both through and leave two blocks describing the same
+    characters.
+    """
+    return any(extent[0] < end and start < extent[1] for start, end in ranges)
+
+
 def _first_page(regions) -> int | None:
     """The page an element starts on, when the service reported one."""
     for region in regions or []:
@@ -579,7 +589,9 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
 
         for figure in getattr(result, "figures", None) or []:
             extent = _span_range(getattr(figure, "spans", None), extracted_text)
-            if extent is None:
+            # A figure holding a table would otherwise be emitted over the top of it. The
+            # table wins: it is the element a consumer can do something with.
+            if extent is None or _overlaps(extent, enclosing):
                 continue
             enclosing.append(extent)
             regions = getattr(figure, "bounding_regions", None)
@@ -596,9 +608,7 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
 
         for paragraph in getattr(result, "paragraphs", None) or []:
             extent = _span_range(getattr(paragraph, "spans", None), extracted_text)
-            if extent is None or any(
-                start <= extent[0] < end for start, end in enclosing
-            ):
+            if extent is None or _overlaps(extent, enclosing):
                 continue
             role = _enum_value(getattr(paragraph, "role", None))
             regions = getattr(paragraph, "bounding_regions", None)
