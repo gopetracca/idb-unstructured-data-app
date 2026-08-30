@@ -52,7 +52,7 @@ router = APIRouter(prefix="/api/v1/contents", tags=["contents"])
     },
     summary="Extract content from a document",
     description="""
-    Extract text content from a document using Azure Document Intelligence.
+    Extract text content from a document using the configured extraction service.
 
     The document must already exist in the source container (default: 'raw').
     The extracted markdown will be stored in the output container (default: 'text').

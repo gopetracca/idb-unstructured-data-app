@@ -63,8 +63,8 @@ async def get_capabilities(
         CapabilitiesResponse with supported formats, strategies, and models
     """
     try:
-        # Get supported formats from document intelligence adapter
-        supported_formats = process_use_case._document_intelligence.get_supported_formats()
+        # Get supported formats from whichever extraction adapter is configured
+        supported_formats = process_use_case._document_extractor.get_supported_formats()
 
         # Get chunking strategies from chunker
         strategies = chunk_use_case._chunker.get_supported_strategies()

@@ -27,9 +27,21 @@ import json
 import pytest
 
 from src.config.settings import get_settings
-from src.core.entities.document_analysis import MarkdownOutput
+from src.core.entities.document_analysis import BlockKind, CellRole, MarkdownOutput
 from src.infrastructure.azure.adapters.document_intelligence_azure import (
     AzureDocumentIntelligenceAdapter,
+)
+from tests.support.extractor_contract import (
+    assert_blocks_are_ordered_and_disjoint,
+    assert_blocks_resolve,
+    assert_every_row_subset_is_a_valid_table,
+    assert_header_rows_match_the_cells,
+    assert_prefix_rows_are_disjoint_from_body_rows,
+    assert_rendering_is_exact,
+    assert_roles_are_canonical,
+    assert_rows_carry_their_provenance,
+    assert_satisfies_the_extraction_contract,
+    assert_table_blocks_resolve_to_a_table,
 )
 from tests.support.sample_documents import BODY, HEADING, TABLE_ROWS, build_sample_pdf
 from tests.support.table_reconstruction import assert_cells_tile_grid, assert_spans_resolve
@@ -144,6 +156,131 @@ class TestLiveExtractionPreservesStructure:
         assert metadata.table_count == len(live_output.tables)
         assert metadata.paragraph_count == len(live_output.paragraphs)
         assert metadata.extraction_method == "azure-document-intelligence"
+
+
+class TestLiveOutputSatisfiesTheCanonicalContract:
+    """The offline fixtures assert this shape; here the real service has to produce it.
+
+    Everything the adapter derives — the block list, the header rows, the partitioned
+    rendering — is derived from a real response rather than one we wrote, which is the only
+    way to find out that the service renders tables as HTML and puts markup between the
+    cell spans.
+    """
+
+    def test_the_whole_contract_holds_against_the_real_service(
+        self, live_output: MarkdownOutput
+    ):
+        """The same assertions every adapter is held to, run on real output."""
+        assert_satisfies_the_extraction_contract(live_output)
+
+    def test_the_service_produced_blocks_at_all(self, live_output: MarkdownOutput):
+        assert live_output.blocks, "the real response yielded no blocks"
+        kinds = {block.kind for block in live_output.blocks}
+        assert BlockKind.TABLE in kinds
+        assert BlockKind.HEADING in kinds
+
+    def test_every_block_resolves_against_the_real_markdown(self, live_output: MarkdownOutput):
+        """The offset invariant, against text nobody here wrote."""
+        assert_blocks_resolve(live_output)
+        text = live_output.extracted_text
+
+        heading = next(b for b in live_output.blocks if b.kind is BlockKind.HEADING)
+        assert HEADING in heading.text_in(text)
+        for block in live_output.blocks:
+            assert block.text_in(text).strip(), f"{block.kind} block resolved to nothing"
+
+    def test_blocks_are_in_reading_order_and_do_not_overlap(self, live_output: MarkdownOutput):
+        """The service reports a paragraph per table cell; the block list must not."""
+        assert_blocks_are_ordered_and_disjoint(live_output)
+        assert len(live_output.paragraphs) > len(live_output.blocks)
+
+    def test_the_table_block_reaches_the_table(self, live_output: MarkdownOutput):
+        assert_table_blocks_resolve_to_a_table(live_output)
+        block = next(b for b in live_output.blocks if b.kind is BlockKind.TABLE)
+        assert block.table_index == 0
+
+    def test_block_geometry_declares_its_unit_and_origin(self, live_output: MarkdownOutput):
+        boxes = [b.bounding_box for b in live_output.blocks if b.bounding_box]
+
+        assert boxes, "the service located every element but no box was mapped"
+        for box in boxes:
+            assert box.unit.value == "inch"
+            assert box.origin.value == "top_left"
+            assert box.left <= box.right and box.top <= box.bottom
+            assert len(box.polygon) == 8
+
+    def test_cell_roles_are_canonical(self, live_output: MarkdownOutput):
+        table = live_output.tables[0]
+
+        assert_roles_are_canonical(table)
+        assert CellRole.COLUMN_HEADER in {cell.role for cell in table.cells}
+
+    def test_header_rows_are_derived_from_the_cells(self, live_output: MarkdownOutput):
+        """The sample's first two rows are headers: a merged title over a column header row."""
+        table = live_output.tables[0]
+
+        assert_header_rows_match_the_cells(table)
+        assert table.header_rows == [0, 1]
+
+    def test_rendered_is_the_text_at_the_tables_span(self, live_output: MarkdownOutput):
+        table = live_output.tables[0]
+        span = table.spans[0]
+
+        assert table.rendered
+        assert table.rendered == live_output.extracted_text[
+            span.offset : span.offset + span.length
+        ]
+
+    def test_the_fragment_for_every_body_row_is_the_whole_table(
+        self, live_output: MarkdownOutput
+    ):
+        """The exactness rule, on a rendering the service produced."""
+        table = live_output.tables[0]
+
+        assert table.fragment() == table.rendered
+        assert_rendering_is_exact(table, live_output.extracted_text)
+
+    def test_rows_record_where_they_sit_in_the_markdown(self, live_output: MarkdownOutput):
+        table = live_output.tables[0]
+
+        assert table.rows, "the rendering was not partitioned into rows"
+        assert_rows_carry_their_provenance(table, live_output.extracted_text)
+        assert_prefix_rows_are_disjoint_from_body_rows(table)
+
+    def test_a_row_is_more_than_the_extent_of_its_cell_spans(
+        self, live_output: MarkdownOutput
+    ):
+        """The concrete reason rows exist, checked against the real response.
+
+        Cell spans cover cell content and stop before the markup, so the min-to-max range
+        over a row's cells is not that row's rendering. Cutting there yields text that is
+        not a table.
+        """
+        table = live_output.tables[0]
+        body = table.rows[0]
+        cells = [c for c in table.cells if c.row_index == body.row_index and c.spans]
+        assert cells, "no cell in the first body row carried a span"
+
+        lowest = min(span.offset for cell in cells for span in cell.spans)
+        highest = max(span.offset + span.length for cell in cells for span in cell.spans)
+        from_cell_spans = live_output.extracted_text[lowest:highest]
+
+        assert from_cell_spans != body.rendered
+        assert from_cell_spans in body.rendered
+
+    def test_every_selection_of_rows_composes_into_a_valid_table(
+        self, live_output: MarkdownOutput
+    ):
+        assert_every_row_subset_is_a_valid_table(live_output.tables[0])
+
+    def test_the_stored_output_keeps_all_of_it(self, live_output: MarkdownOutput):
+        """text.json is what downstream reads, so the guarantees have to survive it."""
+        restored = MarkdownOutput.model_validate(
+            json.loads(json.dumps(live_output.model_dump(mode="json")))
+        )
+
+        assert_satisfies_the_extraction_contract(restored)
+        assert len(restored.blocks) == len(live_output.blocks)
 
 
 class TestLiveRawAnalysisIsLossless:

@@ -4,7 +4,13 @@
 import pytest
 
 from src.core.entities.document_analysis import (
+    BlockKind,
+    BoundingBox,
     BoundingRegion,
+    CellRole,
+    ContentBlock,
+    CoordinateOrigin,
+    CoordinateUnit,
     DocumentLine,
     DocumentMetadata,
     ExtractedFigure,
@@ -16,6 +22,7 @@ from src.core.entities.document_analysis import (
     MarkdownOutput,
     PageContent,
     TableCell,
+    TableRow,
     TextSpan,
 )
 from tests.support.table_reconstruction import assert_cells_tile_grid
@@ -265,7 +272,7 @@ class TestExtractedTable:
 
         assert cell.row_span == 1
         assert cell.column_span == 1
-        assert cell.kind == "content"
+        assert cell.role == CellRole.CONTENT
 
 
 class TestStructuralValueObjects:
@@ -357,6 +364,37 @@ class TestBackwardCompatibility:
         assert output.content_format is None
         assert output.raw_analysis is None
 
+    def test_blocks_are_empty_meaning_structure_is_unavailable(self):
+        """Empty is "we do not know", not "this document has none" — see the model docstring."""
+        output = MarkdownOutput.model_validate(self.PRE_CHANGE_TEXT_JSON)
+
+        assert output.blocks == []
+
+    def test_a_stored_table_written_with_kind_still_loads(self):
+        """A `text.json` written before cell roles were canonical must not fail to load."""
+        stored = {
+            **self.PRE_CHANGE_TEXT_JSON,
+            "tables": [
+                {
+                    "row_count": 2,
+                    "column_count": 1,
+                    "cells": [
+                        {"row_index": 0, "column_index": 0, "kind": "columnHeader", "content": "h"},
+                        {"row_index": 1, "column_index": 0, "kind": "content", "content": "v"},
+                    ],
+                }
+            ],
+        }
+
+        output = MarkdownOutput.model_validate(stored)
+        table = output.tables[0]
+
+        assert [cell.role for cell in table.cells] == [CellRole.COLUMN_HEADER, CellRole.CONTENT]
+        # And nothing was derived that the stored output did not contain.
+        assert table.rendered == ""
+        assert table.rows == []
+        assert table.header_rows == []
+
     def test_pre_change_metadata_reports_nothing_preserved(self):
         """This is how a document extracted before the change is told apart."""
         output = MarkdownOutput.model_validate(self.PRE_CHANGE_TEXT_JSON)
@@ -375,3 +413,182 @@ class TestBackwardCompatibility:
             assert dumped[key] == value
         assert dumped["pages"][0]["text"] == "Title Body text."
         assert dumped["extraction_metadata"]["word_count"] == 3
+
+
+class TestCellRoleIsCanonical:
+    """Provider spellings must not reach the stored model."""
+
+    @pytest.mark.parametrize(
+        ("provider_spelling", "expected"),
+        [
+            # Document Intelligence
+            ("content", CellRole.CONTENT),
+            ("columnHeader", CellRole.COLUMN_HEADER),
+            ("rowHeader", CellRole.ROW_HEADER),
+            ("stubHead", CellRole.STUB_HEAD),
+            # Docling, whose booleans an adapter would name this way
+            ("column_header", CellRole.COLUMN_HEADER),
+            ("row_header", CellRole.ROW_HEADER),
+            ("row_section", CellRole.SECTION_ROW),
+        ],
+    )
+    def test_provider_spellings_map_onto_one_role(self, provider_spelling, expected):
+        assert TableCell(kind=provider_spelling).role is expected
+
+    def test_a_kind_with_no_canonical_twin_becomes_content(self):
+        """`description` is a Document Intelligence kind with no canonical role.
+
+        It must not be guessed into the header: repeating a data cell above every fragment
+        of a table asserts a relationship the document does not show. The provider's own
+        spelling stays recoverable from the raw analysis sidecar.
+        """
+        assert TableCell(kind="description").role is CellRole.CONTENT
+        assert TableCell(kind="somethingNewInTheNextApiVersion").role is CellRole.CONTENT
+
+    def test_kind_is_a_readable_alias_reporting_the_canonical_spelling(self):
+        cell = TableCell(kind="columnHeader")
+
+        assert cell.kind == "column_header"
+        assert cell.is_header is True
+
+    def test_an_explicit_role_wins_over_a_kind(self):
+        cell = TableCell.model_validate({"kind": "content", "role": "column_header"})
+
+        assert cell.role is CellRole.COLUMN_HEADER
+
+    def test_a_section_row_is_not_a_header_row(self):
+        """A section row groups body rows; it does not label the columns."""
+        assert TableCell(role=CellRole.SECTION_ROW).is_header is False
+
+
+class TestFragmentComposition:
+    """The one operation a consumer performs on a table's rendering."""
+
+    @staticmethod
+    def _table() -> ExtractedTable:
+        return ExtractedTable(
+            row_count=3,
+            column_count=1,
+            rendered="<table>\n<tr><th>H</th></tr>\n<tr><td>a</td></tr>\n<tr><td>b</td></tr>\n</table>",
+            render_prefix="<table>\n<tr><th>H</th></tr>\n",
+            prefix_row_indices=[0],
+            rows=[
+                TableRow(row_index=1, rendered="<tr><td>a</td></tr>\n", source_range=(30, 50)),
+                TableRow(row_index=2, rendered="<tr><td>b</td></tr>\n", continues_from_row=1),
+            ],
+            render_suffix="</table>",
+        )
+
+    def test_every_body_row_recomposes_the_whole_table(self):
+        table = self._table()
+
+        assert table.fragment() == table.rendered
+
+    def test_a_subset_repeats_the_prefix_and_keeps_the_suffix(self):
+        table = self._table()
+
+        fragment = table.fragment(table.rows[1:])
+
+        assert fragment == "<table>\n<tr><th>H</th></tr>\n<tr><td>b</td></tr>\n</table>"
+
+    def test_an_empty_selection_is_still_a_table(self):
+        table = self._table()
+
+        assert table.fragment([]) == "<table>\n<tr><th>H</th></tr>\n</table>"
+
+
+class TestCanonicalTypesRoundTrip:
+    """Everything the canonical model adds has to survive text.json."""
+
+    @staticmethod
+    def _output(file_id: str) -> MarkdownOutput:
+        return MarkdownOutput(
+            file_id=file_id,
+            extracted_text="# Title\n\n<table>\n<tr><td>a</td></tr>\n</table>",
+            blocks=[
+                ContentBlock(
+                    kind=BlockKind.HEADING,
+                    start=0,
+                    end=7,
+                    page_number=1,
+                    role="title",
+                    bounding_box=BoundingBox(
+                        page_number=1,
+                        left=1.0,
+                        top=1.0,
+                        right=7.5,
+                        bottom=2.0,
+                        unit=CoordinateUnit.INCH,
+                        origin=CoordinateOrigin.TOP_LEFT,
+                        polygon=[1.0, 1.0, 7.5, 1.0, 7.5, 2.0, 1.0, 2.0],
+                    ),
+                ),
+                ContentBlock(
+                    kind=BlockKind.TABLE,
+                    start=9,
+                    end=45,
+                    page_number=1,
+                    table_index=0,
+                    elements=["/paragraphs/1"],
+                ),
+            ],
+            tables=[
+                ExtractedTable(
+                    row_count=1,
+                    column_count=1,
+                    cells=[TableCell(role=CellRole.CONTENT, content="a")],
+                    header_rows=[],
+                    rendered="<table>\n<tr><td>a</td></tr>\n</table>",
+                    render_prefix="<table>\n",
+                    prefix_row_indices=[],
+                    rows=[
+                        TableRow(
+                            row_index=0,
+                            rendered="<tr><td>a</td></tr>\n",
+                            source_range=(17, 37),
+                            continues_from_row=None,
+                        )
+                    ],
+                    render_suffix="</table>",
+                )
+            ],
+        )
+
+    def test_blocks_survive_json(self, sample_file_id: str):
+        output = self._output(sample_file_id)
+
+        restored = MarkdownOutput.model_validate(output.model_dump(mode="json"))
+
+        assert [block.kind for block in restored.blocks] == [BlockKind.HEADING, BlockKind.TABLE]
+        assert restored.blocks[0].role == "title"
+        assert restored.blocks[0].bounding_box.unit is CoordinateUnit.INCH
+        assert restored.blocks[0].bounding_box.origin is CoordinateOrigin.TOP_LEFT
+        assert restored.blocks[0].bounding_box.polygon == [1.0, 1.0, 7.5, 1.0, 7.5, 2.0, 1.0, 2.0]
+        assert restored.blocks[1].table_index == 0
+        assert restored.blocks[1].elements == ["/paragraphs/1"]
+
+    def test_block_ranges_resolve_against_the_text_after_a_round_trip(self, sample_file_id: str):
+        restored = MarkdownOutput.model_validate(self._output(sample_file_id).model_dump(mode="json"))
+
+        assert restored.blocks[0].text_in(restored.extracted_text) == "# Title"
+        assert restored.blocks[0].length == 7
+        assert restored.blocks[1].text_in(restored.extracted_text) == restored.tables[0].rendered
+
+    def test_table_renderings_survive_json(self, sample_file_id: str):
+        restored = MarkdownOutput.model_validate(self._output(sample_file_id).model_dump(mode="json"))
+        table = restored.tables[0]
+
+        assert table.fragment() == table.rendered
+        assert table.rows[0].source_range == (17, 37)
+        assert table.rows[0].continues_from_row is None
+        assert table.cells[0].role is CellRole.CONTENT
+
+    def test_enums_serialise_as_their_canonical_strings(self, sample_file_id: str):
+        """A consumer in another language reads the JSON, not the Python enum."""
+        dumped = self._output(sample_file_id).model_dump(mode="json")
+
+        assert dumped["blocks"][0]["kind"] == "heading"
+        assert dumped["blocks"][0]["bounding_box"]["unit"] == "inch"
+        assert dumped["blocks"][0]["bounding_box"]["origin"] == "top_left"
+        assert dumped["tables"][0]["cells"][0]["role"] == "content"
+        assert "kind" not in dumped["tables"][0]["cells"][0]

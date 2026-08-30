@@ -15,9 +15,15 @@ from src.application.use_cases.process_document import ProcessDocumentUseCase
 from src.core.entities.composites import DocumentWithPipeline
 from src.core.entities.document import Document, ReplacedBlobReferences
 from src.core.entities.document_analysis import (
+    BlockKind,
+    ContentBlock,
+    ExtractedTable,
     ExtractionMetadata,
     MarkdownOutput,
     PageContent,
+    TableCell,
+    TableRow,
+    TextSpan,
 )
 from src.core.entities.pipeline_state import OverallStatus, PipelineState, ProcessingStage
 from src.core.errors import (
@@ -55,7 +61,7 @@ def process_document_use_case(
 
     return ProcessDocumentUseCase(
         blob_client=mock_blob_client,
-        document_intelligence=mock_document_intelligence_adapter,
+        document_extractor=mock_document_intelligence_adapter,
         pipeline_store=mock_pipeline_store,
     )
 
@@ -170,7 +176,7 @@ class TestProcessDocumentUseCase:
 
         use_case = ProcessDocumentUseCase(
             blob_client=mock_blob_client,
-            document_intelligence=mock_document_intelligence_adapter,
+            document_extractor=mock_document_intelligence_adapter,
             pipeline_store=mock_repo,
         )
 
@@ -197,7 +203,7 @@ class TestProcessDocumentUseCase:
 
         use_case = ProcessDocumentUseCase(
             blob_client=mock_blob_client,
-            document_intelligence=mock_document_intelligence_adapter,
+            document_extractor=mock_document_intelligence_adapter,
             pipeline_store=mock_pipeline_store,
         )
 
@@ -230,7 +236,7 @@ class TestProcessDocumentUseCase:
 
         use_case = ProcessDocumentUseCase(
             blob_client=mock_blob_client,
-            document_intelligence=mock_adapter,
+            document_extractor=mock_adapter,
             pipeline_store=mock_pipeline_store,
         )
 
@@ -260,7 +266,7 @@ class TestProcessDocumentUseCase:
 
         use_case = ProcessDocumentUseCase(
             blob_client=mock_blob_client,
-            document_intelligence=mock_adapter,
+            document_extractor=mock_adapter,
             pipeline_store=mock_pipeline_store,
         )
 
@@ -363,7 +369,7 @@ def build_use_case(
     adapter.analyze_document = AsyncMock(return_value=output)
     return ProcessDocumentUseCase(
         blob_client=blob_client,
-        document_intelligence=adapter,
+        document_extractor=adapter,
         pipeline_store=pipeline_store,
         persist_raw_analysis=persist_raw_analysis,
     )
@@ -402,6 +408,125 @@ def sidecar_uploads(mock_blob_client: MagicMock, tenant_id: str, file_id: str) -
         for path, kwargs in uploads_by_path(mock_blob_client).items()
         if path.startswith(prefix)
     }
+
+
+class TestTheCanonicalBlocksReachTextJson:
+    """The stage stores what the adapter produced, including the block list.
+
+    No logic in the use case changes for this — which is the point: the block list is part
+    of the output model, so it serialises with everything else. This test exists so that a
+    future change to how text.json is written cannot drop it silently.
+    """
+
+    @pytest.fixture
+    def request_(self, sample_file_id: str, sample_tenant_id: str) -> DocumentAnalysisRequest:
+        return DocumentAnalysisRequest(
+            file_id=sample_file_id,
+            tenant_id=sample_tenant_id,
+            source_container="raw",
+            output_container="text",
+        )
+
+    @pytest.fixture
+    def output_with_blocks(self, sample_markdown_output: MarkdownOutput) -> MarkdownOutput:
+        text = "# Heading\n\n<table>\n<tr><td>a</td></tr>\n</table>"
+        table = ExtractedTable(
+            row_count=1,
+            column_count=1,
+            cells=[TableCell(row_index=0, column_index=0, content="a")],
+            rendered="<table>\n<tr><td>a</td></tr>\n</table>",
+            render_prefix="<table>\n",
+            rows=[TableRow(row_index=0, rendered="<tr><td>a</td></tr>\n", source_range=(19, 39))],
+            render_suffix="</table>",
+            spans=[TextSpan(offset=11, length=36)],
+        )
+        return sample_markdown_output.model_copy(
+            update={
+                "extracted_text": text,
+                "raw_analysis": RAW_ANALYSIS,
+                "tables": [table],
+                "blocks": [
+                    ContentBlock(kind=BlockKind.HEADING, start=0, end=9, role="title"),
+                    ContentBlock(kind=BlockKind.TABLE, start=11, end=47, table_index=0),
+                ],
+            }
+        )
+
+    async def _text_json(self, use_case, request_, mock_blob_client, tenant_id, file_id) -> dict:
+        await use_case.execute(request_)
+        (written,) = text_uploads(mock_blob_client, tenant_id, file_id).values()
+        return json.loads(written["data"])
+
+    async def test_blocks_are_serialised_into_text_json(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        output_with_blocks,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        use_case = build_use_case(
+            mock_blob_client, mock_document_intelligence_adapter, mock_pipeline_store,
+            output_with_blocks,
+        )
+
+        text_json = await self._text_json(
+            use_case, request_, mock_blob_client, sample_tenant_id, sample_file_id
+        )
+
+        assert [block["kind"] for block in text_json["blocks"]] == ["heading", "table"]
+        assert text_json["blocks"][0]["role"] == "title"
+        assert text_json["blocks"][1]["table_index"] == 0
+
+    async def test_stored_blocks_still_resolve_against_the_stored_text(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        output_with_blocks,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """The offset invariant has to survive storage to be worth anything downstream."""
+        use_case = build_use_case(
+            mock_blob_client, mock_document_intelligence_adapter, mock_pipeline_store,
+            output_with_blocks,
+        )
+
+        text_json = await self._text_json(
+            use_case, request_, mock_blob_client, sample_tenant_id, sample_file_id
+        )
+        restored = MarkdownOutput.model_validate(text_json)
+
+        assert restored.blocks[0].text_in(restored.extracted_text) == "# Heading"
+        assert restored.blocks[1].text_in(restored.extracted_text) == restored.tables[0].rendered
+        assert restored.tables[0].fragment() == restored.tables[0].rendered
+
+    async def test_the_raw_sidecar_is_untouched_by_any_of_this(
+        self,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        mock_pipeline_store,
+        output_with_blocks,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """The sidecar is the provider's response verbatim; the canonical model is separate."""
+        use_case = build_use_case(
+            mock_blob_client, mock_document_intelligence_adapter, mock_pipeline_store,
+            output_with_blocks,
+        )
+
+        await use_case.execute(request_)
+
+        (sidecar,) = sidecar_uploads(
+            mock_blob_client, sample_tenant_id, sample_file_id
+        ).values()
+        assert json.loads(sidecar["data"]) == RAW_ANALYSIS
 
 
 class TestRawAnalysisPersistence:

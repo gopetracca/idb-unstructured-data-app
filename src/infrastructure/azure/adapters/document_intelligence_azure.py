@@ -1,4 +1,4 @@
-"""Azure Document Intelligence adapter implementing DocumentIntelligencePort."""
+"""Azure Document Intelligence adapter implementing DocumentExtractorPort."""
 
 import logging
 from datetime import datetime
@@ -6,10 +6,15 @@ from datetime import datetime
 from azure.ai.documentintelligence.models import AnalyzeResult, DocumentContentFormat
 from azure.core.exceptions import HttpResponseError
 
-from src.application.ports.document_intelligence import DocumentIntelligencePort
+from src.application.ports.document_extractor import DocumentExtractorPort
 from src.config.settings import DocumentIntelligenceSettings, get_settings
 from src.core.entities.document_analysis import (
+    BlockKind,
+    BoundingBox,
     BoundingRegion,
+    ContentBlock,
+    CoordinateOrigin,
+    CoordinateUnit,
     DocumentLine,
     DocumentSection,
     DocumentStyle,
@@ -25,10 +30,16 @@ from src.core.entities.document_analysis import (
     SelectionMark,
     TableCell,
     TextSpan,
+    cell_role_from,
 )
 from src.core.errors import DocumentProcessingError, UnsupportedFormatError
 from src.infrastructure.azure.clients.document_intelligence_client import (
     DocumentIntelligenceClient,
+)
+from src.infrastructure.extraction.tables import (
+    header_rows_from_cells,
+    partition_html_table,
+    row_continuations_from_cells,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,12 +88,81 @@ def _caption_content(caption) -> str | None:
     return getattr(caption, "content", None)
 
 
-class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
-    """
-    Azure Document Intelligence implementation of DocumentIntelligencePort.
+# Document Intelligence measures every polygon in inches from the page's top-left corner.
+# The canonical box records that rather than assuming it, so a provider using points or a
+# bottom-left origin cannot be silently compared against one of these.
+_DI_COORDINATE_UNIT = CoordinateUnit.INCH
+_DI_COORDINATE_ORIGIN = CoordinateOrigin.TOP_LEFT
 
-    Uses the Azure Document Intelligence service to analyze documents
-    and extract text as markdown.
+# Paragraph roles that make a paragraph a heading. Every other role — pageHeader,
+# pageFooter, footnote, formulaBlock, or none at all — is a paragraph, and the service's
+# own spelling rides along on the block so nothing is lost by the narrowing.
+_HEADING_ROLES = {"title", "sectionHeading"}
+
+
+def _bounding_box(regions) -> BoundingBox | None:
+    """Build a canonical box from the first bounding region the service supplied.
+
+    The first region is the element's own page: an element crossing a page boundary gets
+    several, and a box that merged them would describe a rectangle on no page at all.
+    """
+    for region in regions or []:
+        polygon = list(getattr(region, "polygon", None) or [])
+        xs = polygon[0::2]
+        ys = polygon[1::2]
+        if not xs or not ys:
+            continue
+        return BoundingBox(
+            page_number=region.page_number,
+            left=min(xs),
+            top=min(ys),
+            right=max(xs),
+            bottom=max(ys),
+            unit=_DI_COORDINATE_UNIT,
+            origin=_DI_COORDINATE_ORIGIN,
+            polygon=polygon,
+        )
+    return None
+
+
+def _first_page(regions) -> int | None:
+    """The page an element starts on, when the service reported one."""
+    for region in regions or []:
+        return region.page_number
+    return None
+
+
+def _span_range(spans, extracted_text: str) -> tuple[int, int] | None:
+    """The element's extent in the extracted text, from the first span it carries.
+
+    Document Intelligence gives an element one span in practice; where it gives several
+    the first is the one that locates the element, and a range spanning the gap between
+    them would claim text the element does not own.
+
+    A range that does not fit the text is discarded rather than clamped. That happens when
+    the service returned no `content` and the adapter fell back to joining page text: the
+    spans then index a string nobody has. The offset invariant is the point of this model,
+    so an element that cannot honour it is left out instead of pointing somewhere wrong.
+    """
+    for span in spans or []:
+        offset = span.offset or 0
+        end = offset + (span.length or 0)
+        return (offset, end) if 0 <= offset <= end <= len(extracted_text) else None
+    return None
+
+
+class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
+    """
+    Azure Document Intelligence implementation of DocumentExtractorPort.
+
+    Uses the Azure Document Intelligence service to analyze documents and extract text as
+    markdown, then maps that response onto the canonical extraction model.
+
+    The service satisfies the port's offset invariant almost for free: it reports spans
+    into the very `content` it returns, so a block's `(start, end)` is that span. What the
+    adapter still owes the contract is the table rendering — the service returns tables as
+    HTML inside the markdown, and the adapter partitions that HTML so that no consumer
+    ever has to recognise it.
     """
 
     SUPPORTED_FORMATS = [
@@ -309,7 +389,7 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             if page_confidences:
                 confidence = sum(page_confidences) / len(page_confidences)
 
-        tables = [self._map_table(table) for table in (result.tables or [])]
+        tables = [self._map_table(table, extracted_text) for table in (result.tables or [])]
         figures = [self._map_figure(figure) for figure in (getattr(result, "figures", None) or [])]
         paragraphs = [
             ExtractedParagraph(
@@ -382,6 +462,7 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             pages=pages,
             extraction_metadata=extraction_metadata,
             created_at=datetime.utcnow(),
+            blocks=self._map_blocks(result, extracted_text),
             tables=tables,
             figures=figures,
             paragraphs=paragraphs,
@@ -408,34 +489,134 @@ class AzureDocumentIntelligenceAdapter(DocumentIntelligencePort):
             return None
 
     @staticmethod
-    def _map_table(table) -> ExtractedTable:
-        """Map one table, keeping every cell's position in the grid."""
+    def _map_table(table, extracted_text: str) -> ExtractedTable:
+        """Map one table: the cell grid, plus the rendering partitioned for reuse.
+
+        `rendered` is the table's span sliced out of the markdown — the HTML the service
+        already produced — and the prefix/rows/suffix are a split of that same string.
+        Nothing here reassembles a row from cell spans: those cover cell content and stop
+        short of the `<tr>` and `<td>` around it.
+        """
+        cells = [
+            TableCell(
+                row_index=getattr(cell, "row_index", 0) or 0,
+                column_index=getattr(cell, "column_index", 0) or 0,
+                # The service omits a span of 1 rather than sending it.
+                row_span=getattr(cell, "row_span", None) or 1,
+                column_span=getattr(cell, "column_span", None) or 1,
+                role=cell_role_from(_enum_value(getattr(cell, "kind", None))),
+                content=cell.content or "",
+                elements=list(getattr(cell, "elements", None) or []),
+                spans=_map_spans(getattr(cell, "spans", None)),
+                bounding_regions=_map_regions(getattr(cell, "bounding_regions", None)),
+            )
+            for cell in (getattr(table, "cells", None) or [])
+        ]
+
+        spans = _map_spans(getattr(table, "spans", None))
+        header_rows = header_rows_from_cells(cells)
+        extent = _span_range(spans, extracted_text)
+        rendered = extracted_text[extent[0] : extent[1]] if extent else ""
+        partition = partition_html_table(
+            rendered=rendered,
+            header_rows=header_rows,
+            continuations=row_continuations_from_cells(cells),
+            source_offset=extent[0] if extent else None,
+        )
+
         return ExtractedTable(
             row_count=getattr(table, "row_count", 0) or 0,
             column_count=getattr(table, "column_count", 0) or 0,
-            cells=[
-                TableCell(
-                    row_index=getattr(cell, "row_index", 0) or 0,
-                    column_index=getattr(cell, "column_index", 0) or 0,
-                    # The service omits a span of 1 rather than sending it.
-                    row_span=getattr(cell, "row_span", None) or 1,
-                    column_span=getattr(cell, "column_span", None) or 1,
-                    kind=_enum_value(getattr(cell, "kind", None)) or "content",
-                    content=cell.content or "",
-                    elements=list(getattr(cell, "elements", None) or []),
-                    spans=_map_spans(getattr(cell, "spans", None)),
-                    bounding_regions=_map_regions(getattr(cell, "bounding_regions", None)),
-                )
-                for cell in (getattr(table, "cells", None) or [])
-            ],
+            cells=cells,
             caption=_caption_content(getattr(table, "caption", None)),
             footnotes=[
                 footnote.content or ""
                 for footnote in (getattr(table, "footnotes", None) or [])
             ],
-            spans=_map_spans(getattr(table, "spans", None)),
+            spans=spans,
             bounding_regions=_map_regions(getattr(table, "bounding_regions", None)),
+            header_rows=header_rows,
+            rendered=rendered,
+            render_prefix=partition.prefix,
+            prefix_row_indices=partition.prefix_row_indices,
+            render_suffix=partition.suffix,
+            rows=partition.rows,
         )
+
+    @staticmethod
+    def _map_blocks(result: AnalyzeResult, extracted_text: str) -> list[ContentBlock]:
+        """Build the canonical block list: paragraphs, tables and figures, in reading order.
+
+        Reading order is span order — the service reports every element's position in the
+        markdown it returned, so sorting by offset reproduces the document.
+
+        Elements a table or figure encloses are dropped rather than emitted twice: the
+        service models each table cell as a paragraph as well, and a block list holding
+        both would overlap itself and make "the blocks in order" mean two different
+        documents. Those paragraphs remain reachable as the table's cells.
+        """
+        enclosing: list[tuple[int, int]] = []
+        blocks: list[ContentBlock] = []
+
+        for index, table in enumerate(result.tables or []):
+            extent = _span_range(getattr(table, "spans", None), extracted_text)
+            if extent is None:
+                continue
+            enclosing.append(extent)
+            regions = getattr(table, "bounding_regions", None)
+            blocks.append(
+                ContentBlock(
+                    kind=BlockKind.TABLE,
+                    start=extent[0],
+                    end=extent[1],
+                    page_number=_first_page(regions),
+                    bounding_box=_bounding_box(regions),
+                    # Without this a consumer can see that a region is a table and still
+                    # not reach the renderings it needs to emit part of one.
+                    table_index=index,
+                )
+            )
+
+        for figure in getattr(result, "figures", None) or []:
+            extent = _span_range(getattr(figure, "spans", None), extracted_text)
+            if extent is None:
+                continue
+            enclosing.append(extent)
+            regions = getattr(figure, "bounding_regions", None)
+            blocks.append(
+                ContentBlock(
+                    kind=BlockKind.FIGURE,
+                    start=extent[0],
+                    end=extent[1],
+                    page_number=_first_page(regions),
+                    bounding_box=_bounding_box(regions),
+                    elements=list(getattr(figure, "elements", None) or []),
+                )
+            )
+
+        for paragraph in getattr(result, "paragraphs", None) or []:
+            extent = _span_range(getattr(paragraph, "spans", None), extracted_text)
+            if extent is None or any(
+                start <= extent[0] < end for start, end in enclosing
+            ):
+                continue
+            role = _enum_value(getattr(paragraph, "role", None))
+            regions = getattr(paragraph, "bounding_regions", None)
+            blocks.append(
+                ContentBlock(
+                    kind=BlockKind.HEADING if role in _HEADING_ROLES else BlockKind.PARAGRAPH,
+                    start=extent[0],
+                    end=extent[1],
+                    page_number=_first_page(regions),
+                    bounding_box=_bounding_box(regions),
+                    # The narrowing to a canonical kind is lossy; the service's own role
+                    # rides along so a consumer that cares about pageFooter can still see it.
+                    role=role,
+                )
+            )
+
+        blocks.sort(key=lambda block: (block.start, block.end))
+        return blocks
 
     @staticmethod
     def _map_figure(figure) -> ExtractedFigure:

@@ -58,7 +58,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
     },
     summary="Analyze a document",
     description="""
-    Analyze a document using Azure Document Intelligence and extract text as markdown.
+    Analyze a document with the configured extraction service and extract text as markdown.
 
     The document must already exist in the source container (default: 'raw').
     The extracted markdown will be stored in the output container (default: 'text').
@@ -205,4 +205,4 @@ async def get_supported_formats(
     Returns:
         List of supported MIME type strings
     """
-    return use_case._document_intelligence.get_supported_formats()
+    return use_case._document_extractor.get_supported_formats()

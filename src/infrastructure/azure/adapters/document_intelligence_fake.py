@@ -1,12 +1,18 @@
-"""Fake Document Intelligence adapter for local development and testing."""
+"""Fake extraction adapter for local development and testing."""
 
 import asyncio
 import logging
 from datetime import datetime
 
-from src.application.ports.document_intelligence import DocumentIntelligencePort
+from src.application.ports.document_extractor import DocumentExtractorPort
 from src.core.entities.document_analysis import (
+    BlockKind,
+    BoundingBox,
     BoundingRegion,
+    CellRole,
+    ContentBlock,
+    CoordinateOrigin,
+    CoordinateUnit,
     DocumentLine,
     ExtractedParagraph,
     ExtractedTable,
@@ -17,16 +23,42 @@ from src.core.entities.document_analysis import (
     TextSpan,
 )
 from src.core.errors import DocumentProcessingError, UnsupportedFormatError
+from src.infrastructure.extraction.tables import (
+    header_rows_from_cells,
+    partition_pipe_table,
+    row_continuations_from_cells,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class FakeDocumentIntelligenceAdapter(DocumentIntelligencePort):
+def _fake_box() -> BoundingBox:
+    """A plausible box in the units the fake claims on its page."""
+    return BoundingBox(
+        page_number=1,
+        left=1.0,
+        top=1.0,
+        right=7.5,
+        bottom=3.0,
+        unit=CoordinateUnit.INCH,
+        origin=CoordinateOrigin.TOP_LEFT,
+        polygon=[1.0, 1.0, 7.5, 1.0, 7.5, 3.0, 1.0, 3.0],
+    )
+
+
+class FakeDocumentIntelligenceAdapter(DocumentExtractorPort):
     """
-    Fake implementation of Document Intelligence for local development.
+    Fake implementation of the extraction port for local development.
 
     This adapter simulates document processing without requiring Azure resources.
-    It provides simple text extraction for testing.
+
+    It satisfies the same contract as the real one rather than a simplification of it:
+    canonical blocks whose ranges resolve against the text, canonical cell roles, derived
+    header rows, and a table rendering partitioned into a prefix, body rows and a suffix.
+    It deliberately renders its table as a Markdown *pipe* table where Document
+    Intelligence renders HTML — a form that cannot express a table without a header line
+    and its delimiter — so that a local run exercises the case where the prefix carries a
+    row, instead of only the case where it does not.
     """
 
     SUPPORTED_FORMATS = [
@@ -166,6 +198,7 @@ class FakeDocumentIntelligenceAdapter(DocumentIntelligencePort):
                 pages=pages,
                 extraction_metadata=extraction_metadata,
                 created_at=datetime.utcnow(),
+                blocks=self._simulated_blocks(paragraphs, table),
                 tables=[table],
                 paragraphs=paragraphs,
                 content_format="markdown",
@@ -246,30 +279,88 @@ class FakeDocumentIntelligenceAdapter(DocumentIntelligencePort):
         Deliberately includes a merged cell and a column-header row: those are the cases
         that a rendered-markdown-only representation cannot round-trip, so local runs
         against the fake exercise the same reconstruction path as the real service.
+
+        The rendering is partitioned by the same helper an adapter for a pipe-table
+        provider would use, so `render_prefix` carries the header line *and* its
+        delimiter and every fragment composed from these rows is a table in its own right.
         """
         region = [BoundingRegion(page_number=1, polygon=[1.0, 1.0, 7.5, 1.0, 7.5, 3.0, 1.0, 3.0])]
+        cells = [
+            TableCell(
+                row_index=0,
+                column_index=0,
+                column_span=2,
+                role=CellRole.COLUMN_HEADER,
+                content="Simulated Table",
+                bounding_regions=region,
+            ),
+            TableCell(
+                row_index=1, column_index=0, role=CellRole.COLUMN_HEADER, content="Field"
+            ),
+            TableCell(
+                row_index=1, column_index=1, role=CellRole.COLUMN_HEADER, content="Value"
+            ),
+            TableCell(row_index=2, column_index=0, content="File ID"),
+            TableCell(row_index=2, column_index=1, content=file_id),
+        ]
+        rendered = self._table_markdown(file_id)
+        header_rows = header_rows_from_cells(cells)
+        partition = partition_pipe_table(
+            rendered=rendered,
+            header_rows=header_rows,
+            continuations=row_continuations_from_cells(cells),
+            source_offset=offset,
+        )
         return ExtractedTable(
             row_count=3,
             column_count=2,
-            cells=[
-                TableCell(
-                    row_index=0,
-                    column_index=0,
-                    column_span=2,
-                    kind="columnHeader",
-                    content="Simulated Table",
-                    bounding_regions=region,
-                ),
-                TableCell(row_index=1, column_index=0, kind="columnHeader", content="Field"),
-                TableCell(row_index=1, column_index=1, kind="columnHeader", content="Value"),
-                TableCell(row_index=2, column_index=0, content="File ID"),
-                TableCell(row_index=2, column_index=1, content=file_id),
-            ],
+            cells=cells,
             caption="Simulated extraction summary",
-            footnotes=["Produced by the fake Document Intelligence adapter."],
+            footnotes=["Produced by the fake extraction adapter."],
             spans=[TextSpan(offset=offset, length=length)],
             bounding_regions=region,
+            header_rows=header_rows,
+            rendered=rendered,
+            render_prefix=partition.prefix,
+            prefix_row_indices=partition.prefix_row_indices,
+            render_suffix=partition.suffix,
+            rows=partition.rows,
         )
+
+    @staticmethod
+    def _simulated_blocks(
+        paragraphs: list[ExtractedParagraph], table: ExtractedTable
+    ) -> list[ContentBlock]:
+        """Emit the canonical block list for what this adapter rendered.
+
+        The fake writes its own text, so it is the case the port docstring describes:
+        nothing hands it offsets, and it records the range it wrote for each element.
+        """
+        blocks = [
+            ContentBlock(
+                kind=BlockKind.HEADING if paragraph.role == "title" else BlockKind.PARAGRAPH,
+                start=span.offset,
+                end=span.offset + span.length,
+                page_number=1,
+                bounding_box=_fake_box(),
+                role=paragraph.role,
+            )
+            for paragraph in paragraphs
+            for span in paragraph.spans[:1]
+        ]
+        span = table.spans[0]
+        blocks.append(
+            ContentBlock(
+                kind=BlockKind.TABLE,
+                start=span.offset,
+                end=span.offset + span.length,
+                page_number=1,
+                bounding_box=_fake_box(),
+                table_index=0,
+                elements=["/tables/0"],
+            )
+        )
+        return blocks
 
     @staticmethod
     def _lines_from_text(text: str) -> list[DocumentLine]:

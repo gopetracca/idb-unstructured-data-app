@@ -1,4 +1,4 @@
-"""Use case for processing documents with Document Intelligence."""
+"""Use case for the `convert` stage: extracting a document's text and structure."""
 
 import json
 import logging
@@ -11,7 +11,7 @@ from src.application.dto.document_analysis import (
     ProcessingStatus,
 )
 from src.application.ports.blob_client import BlobClientPort
-from src.application.ports.document_intelligence import DocumentIntelligencePort
+from src.application.ports.document_extractor import DocumentExtractorPort
 from src.application.ports.pipeline_store import PipelineStorePort
 from src.application.ports.processing_events import ProcessingEventsPort
 from src.config.settings import get_settings
@@ -34,7 +34,7 @@ class ProcessDocumentUseCase:
     Orchestrates the flow:
     1. Retrieve raw document from blob storage
     2. Validate content type is supported
-    3. Call document intelligence adapter
+    3. Call the extraction adapter
     4. Store the verbatim analysis response and the markdown output in the text container
        (the sidecar is rolled back if the text output cannot be stored, so the two are
        never left describing different runs)
@@ -45,7 +45,7 @@ class ProcessDocumentUseCase:
     def __init__(
         self,
         blob_client: BlobClientPort,
-        document_intelligence: DocumentIntelligencePort,
+        document_extractor: DocumentExtractorPort,
         pipeline_store: PipelineStorePort,
         processing_events: ProcessingEventsPort | None = None,
         persist_raw_analysis: bool | None = None,
@@ -55,14 +55,14 @@ class ProcessDocumentUseCase:
 
         Args:
             blob_client: Client for blob storage operations
-            document_intelligence: Document intelligence port implementation
+            document_extractor: Extraction port implementation, whichever service backs it
             pipeline_store: Repository for pipeline state operations
             processing_events: Optional ProcessingEventsPort for stage tracking
             persist_raw_analysis: Whether to store the verbatim analysis response as a
                 sidecar blob. Defaults to DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT.
         """
         self._blob_client = blob_client
-        self._document_intelligence = document_intelligence
+        self._document_extractor = document_extractor
         self._pipeline_store = pipeline_store
         self._processing_events = processing_events
         if persist_raw_analysis is None:
@@ -132,10 +132,10 @@ class ProcessDocumentUseCase:
                 )
 
             # Validate content type
-            if not self._document_intelligence.is_format_supported(doc.document.content_type):
+            if not self._document_extractor.is_format_supported(doc.document.content_type):
                 raise UnsupportedFormatError(
                     content_type=doc.document.content_type,
-                    supported_formats=self._document_intelligence.get_supported_formats(),
+                    supported_formats=self._document_extractor.get_supported_formats(),
                 )
 
             # Update status to processing
@@ -154,7 +154,7 @@ class ProcessDocumentUseCase:
             )
 
             # Analyze document
-            markdown_output = await self._document_intelligence.analyze_document(
+            markdown_output = await self._document_extractor.analyze_document(
                 document_content=document_content,
                 content_type=doc.document.content_type,
                 file_id=request.file_id,
