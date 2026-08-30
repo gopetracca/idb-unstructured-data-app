@@ -587,3 +587,192 @@ class TestRawAnalysisPersistence:
             f"{sample_tenant_id}/{sample_file_id}/analysis.json"
         ]["data"]
         assert "2026-01-01 12:00:00" in data
+
+
+class StatefulBlobReferences:
+    """A pipeline store that remembers references, like the real one does.
+
+    The mocks elsewhere in this file assert on call arguments, which cannot show what a
+    *second* run does to a row the first run wrote. This keeps the state so reprocessing
+    can be tested as the sequence it actually is.
+    """
+
+    def __init__(self, doc):
+        self._doc = doc
+        self.raw_blob_ref = doc.document.raw_blob_ref
+        self.text_blob_ref = None
+        self.analysis_blob_ref = None
+
+    async def get_by_id(self, tenant_id, file_id):
+        return self._doc
+
+    async def mark_processing(self, *args, **kwargs):
+        return self._doc.pipeline
+
+    async def mark_failed(self, *args, **kwargs):
+        return self._doc.pipeline
+
+    async def update_blob_references(
+        self,
+        tenant_id,
+        file_id,
+        raw_blob_ref=None,
+        text_blob_ref=None,
+        analysis_blob_ref=None,
+        clear_analysis_blob_ref=False,
+    ):
+        # Mirrors DocumentRepositorySQLServer: None means "leave alone", clearing is
+        # explicit. The SQL Server tests pin that this mirror is faithful.
+        if raw_blob_ref is not None:
+            self.raw_blob_ref = raw_blob_ref
+        if text_blob_ref is not None:
+            self.text_blob_ref = text_blob_ref
+        if analysis_blob_ref is not None:
+            self.analysis_blob_ref = analysis_blob_ref
+        elif clear_analysis_blob_ref:
+            self.analysis_blob_ref = None
+
+
+class TestReprocessingADocumentThatAlreadyHasASidecar:
+    """The case that motivated the explicit clear.
+
+    A document extracted once with a sidecar, then re-extracted without one, must not keep
+    pointing at the first run's analysis.json: that file describes the earlier content,
+    and the text.json now beside it says `raw_analysis_stored: false`.
+    """
+
+    @pytest.fixture
+    def request_(self, sample_file_id: str, sample_tenant_id: str) -> DocumentAnalysisRequest:
+        return DocumentAnalysisRequest(
+            file_id=sample_file_id,
+            tenant_id=sample_tenant_id,
+            source_container="raw",
+            output_container="text",
+        )
+
+    @pytest.fixture
+    def store(self, sample_document_with_pipeline) -> StatefulBlobReferences:
+        return StatefulBlobReferences(sample_document_with_pipeline)
+
+    async def _run(
+        self, store, blob_client, adapter, output, request_, persist: bool
+    ):
+        use_case = build_use_case(
+            blob_client, adapter, store, output, persist_raw_analysis=persist
+        )
+        return await use_case.execute(request_)
+
+    async def test_first_run_records_the_reference(
+        self,
+        store,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        markdown_output_with_raw,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        await self._run(
+            store,
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            markdown_output_with_raw,
+            request_,
+            persist=True,
+        )
+
+        assert store.analysis_blob_ref == f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+
+    async def test_reprocessing_with_persistence_disabled_clears_the_reference(
+        self,
+        store,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        markdown_output_with_raw,
+        request_,
+    ):
+        await self._run(
+            store,
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            markdown_output_with_raw,
+            request_,
+            persist=True,
+        )
+        assert store.analysis_blob_ref is not None
+
+        await self._run(
+            store,
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            markdown_output_with_raw,
+            request_,
+            persist=False,
+        )
+
+        assert store.analysis_blob_ref is None
+
+    async def test_reprocessing_with_a_failing_sidecar_write_clears_the_reference(
+        self,
+        store,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        markdown_output_with_raw,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        await self._run(
+            store,
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            markdown_output_with_raw,
+            request_,
+            persist=True,
+        )
+        assert store.analysis_blob_ref is not None
+
+        analysis_path = f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+
+        async def upload(container, blob_path, data, content_type=None, **kwargs):
+            if blob_path == analysis_path:
+                raise RuntimeError("blob storage said no")
+            return f"https://blob/{blob_path}"
+
+        mock_blob_client.upload_blob = AsyncMock(side_effect=upload)
+
+        result = await self._run(
+            store,
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            markdown_output_with_raw,
+            request_,
+            persist=True,
+        )
+
+        assert result.status == ProcessingStatus.COMPLETED
+        assert store.analysis_blob_ref is None
+
+    async def test_reprocessing_still_updates_the_text_reference(
+        self,
+        store,
+        mock_blob_client,
+        mock_document_intelligence_adapter,
+        markdown_output_with_raw,
+        request_,
+        sample_document_with_pipeline,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """Clearing one reference must not disturb the others."""
+        await self._run(
+            store,
+            mock_blob_client,
+            mock_document_intelligence_adapter,
+            markdown_output_with_raw,
+            request_,
+            persist=False,
+        )
+
+        assert store.text_blob_ref == f"{sample_tenant_id}/{sample_file_id}/text.json"
+        assert store.raw_blob_ref == sample_document_with_pipeline.document.raw_blob_ref
