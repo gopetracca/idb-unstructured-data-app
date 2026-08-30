@@ -35,13 +35,22 @@
 
 - [ ] 3.1 Emit `blocks` in reading order, interleaving paragraphs and tables by span
       offset, mapping paragraph roles to `BlockKind` (`title`/`sectionHeading` → heading,
-      others → paragraph, with the role preserved).
+      others → paragraph, with the role preserved). On each block set `start` and `end`
+      from the element's span, `page_number` and `bounding_box` from its bounding regions,
+      `elements` from the provider's references, and `table_index` on every table block so
+      it resolves to its entry in `tables` — without that last one a consumer can see that a
+      region is a table and not reach the renderings needed to emit part of one.
 - [ ] 3.2 Map cell `kind` strings to `CellRole`; derive `header_rows` from the cells that
       carry a header role.
 - [ ] 3.3 Populate `rendered` from the table's span into `content`. Derive `render_prefix`,
       `rows` and `render_suffix` by partitioning that rendering at `</tr>` boundaries —
       partitioning a string the adapter already has, never reassembling one from cell
       spans, which cover cell content only and would exclude the markup.
+- [ ] 3.3b Populate `prefix_row_indices` with the rows the prefix carries — for this
+      adapter, the leading header `<tr>` elements, which is non-empty for most tables — and
+      `row_index` on each body row, numbering rows across the whole table so the prefix's
+      rows and the body rows share one sequence. Leaving `prefix_row_indices` empty for a
+      prefix that carries rows would report that nothing is repeated when something is.
 - [ ] 3.3a Record each body row's `source_range` from its offset within the table's span,
       and set `continues_from_row` for rows covered by a cell with a row span greater
       than one.
@@ -85,6 +94,10 @@
       into a valid table — parameterised over the adapters that exist, so a future Docling
       adapter inherits the same bar.
 - [ ] 5.4 Fake adapter passes the same contract test.
+- [ ] 5.4a Every field the canonical model declares is populated by the Azure adapter and
+      asserted somewhere in these tests. A field with no producer is indistinguishable from
+      one the provider does not supply, and this list has already grown fields that nothing
+      set.
 - [ ] 5.5 Live test: the offset invariant and `rendered` hold against the real service.
 
 ## 6. Docs
