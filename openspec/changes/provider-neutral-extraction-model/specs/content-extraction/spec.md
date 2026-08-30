@@ -101,6 +101,13 @@ are the same regardless of which service produced them.
 - **THEN** it is still reported as a header row, and it remains an ordinary body row in
   document order rather than being moved into the prefix
 
+#### Scenario: The fragment for every body row is the whole table
+
+- **WHEN** a table's rendering is contiguous in `extracted_text`
+- **THEN** the fragment composed from all of its body rows equals its full rendering
+  exactly, byte for byte — which holds for every table, including one whose header rows are
+  not its leading rows and one the provider marked as having no header
+
 #### Scenario: Rows carry their own source range
 
 - **WHEN** a body row's rendering occupies a contiguous range of `extracted_text`

@@ -71,11 +71,12 @@ carry no span at all, so a row of empty cells has no derivable range; a vertical
 cell belongs to several rows but spans only where its content sits; and a cell's content
 may arrive as several discontiguous spans.
 
-**The exactness rule.** For a table whose rendering is contiguous in `text`,
-`render_prefix + every row's rendering + render_suffix` SHALL equal `rendered` exactly. The
-adapter can guarantee this by construction, because it partitions a string it produced
-rather than reassembling one it inferred — and the equality is a cheap, decisive test that
-an adapter has done the partition correctly.
+**The exactness rule**, stated normatively by *The fragment for every body row is the whole
+table*: the fragment composed from all body rows equals `rendered` exactly. An adapter can
+guarantee it by construction, because it partitions a string it produced rather than
+reassembling one it inferred — and the equality is a cheap, decisive test that the partition
+was done correctly. It is the property most worth keeping, since every other guarantee here
+rests on the parts really being the whole.
 
 **Merged cells across rows.** A cell spanning several rows makes those rows inseparable:
 its content is rendered once, in the first of them, and a piece containing only the later

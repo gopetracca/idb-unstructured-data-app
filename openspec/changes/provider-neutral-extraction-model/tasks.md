@@ -60,14 +60,18 @@
 
 ## 5. Tests
 
+> Where a task names a scenario, the scenario in the delta is the statement of record and
+> the task must not paraphrase it.
+
 - [ ] 5.1 `tests/unit/core/entities/test_document_analysis.py` — canonical types round-trip;
       a pre-change `text.json` loads with empty blocks and roles mapped from `kind`.
 - [ ] 5.2 `tests/unit/infrastructure/adapters/test_document_intelligence_azure.py` — from
       the existing fixture: blocks in reading order, every block's span resolves against
       `extracted_text`, header rows derived from roles, `rendered` equal to the text at the
       table's span.
-- [ ] 5.2a The exactness rule: `render_prefix` + every row + `render_suffix` equals
-      `rendered`, byte for byte, for a contiguously rendered table.
+- [ ] 5.2a Cover *The fragment for every body row is the whole table*: the fragment composed from
+      every **body** row equals `rendered` byte for byte, for a contiguously rendered table.
+      Rows the prefix carries are not body rows and are not counted twice.
 - [ ] 5.2b A table with an empty cell, and one with a cell spanning two rows: rows still
       partition the rendering, and the covered rows are marked `continues_from_row`.
 - [ ] 5.2c A table whose header row is not its first row: `header_rows` reports it, the

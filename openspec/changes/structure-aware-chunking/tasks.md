@@ -54,17 +54,20 @@
 
 ## 5. Tests
 
+> Where a task names a scenario, the scenario in the delta is the statement of record and
+> the task must not paraphrase it. Restating requirements here is what let the tasks drift
+> out of step with the spec three times during review.
+
 - [ ] 5.1 Partitioner unit tests: a table within size stays whole; an oversized table splits
       on row boundaries; every fragment is `render_prefix` + its rows + `render_suffix`; a
       single oversized row group is emitted whole. Note that *every* fragment carries the
       prefix, including for a table with no header cells — the prefix is what the rendering
       puts before the first body row, not a header, and for some forms it is never empty.
-- [ ] 5.2 The same document rendered as HTML and as pipe tables obeys the same rules — no
-      cut inside a row, no cut inside a merged-row group, every piece a fragment, same
-      metadata semantics. Do **not** assert identical boundaries: `chunk_size` is a budget
-      on text length, and an HTML row runs about 2.6× a pipe row, so the HTML form yields
-      more pieces cut at different rows. A test asserting equality here would be wrong and
-      would have to be weakened later.
+- [ ] 5.2 Cover *The rules do not depend on the rendering* and *Where the boundaries fall
+      does depend on the rendering* with the same document in both forms. Implementation
+      note, not in the spec: do **not** assert identical boundaries — `chunk_size` is a
+      budget on text length and an HTML row runs about 2.6× a pipe row, so a test asserting
+      equality would be wrong and would have to be weakened later.
 - [ ] 5.3 `chunk_document` tests: on both the block-list path and the fallback path, every
       chunk's `start_char`/`end_char` delimit a valid range of `extracted_text` covering the
       content that chunk derives from — which is *not* the same as equalling the chunk's
@@ -74,19 +77,22 @@
 - [ ] 5.4 Both chunker adapters produce the same table chunks for the same input.
 - [ ] 5.5 A regression for the defect that motivated this: a table larger than the chunk
       size must not produce a single chunk exceeding it.
-- [ ] 5.6 A split table yields no whole-table chunk, every row appears in exactly one piece,
-      and all pieces share one `table_id` with distinct row ranges.
+- [ ] 5.6 Cover *A split table is one table, not a table and copies of it*, *The repeated
+      frame is not a duplicated row*, and *Pieces are attributable to one table*. Note that
+      the coverage rule is about **body** rows: whatever the prefix carries is repeated in
+      every piece by design, so a test asserting that no content recurs across pieces would
+      contradict the contract.
 - [ ] 5.7 Offsets: a prose chunk's text equals the slice at its offsets; a table piece
       carrying a prefix does not, and records the prefix's source range and the flag instead.
       Cover a pipe-table piece whose prefix is a row the provider did not mark as a header.
 - [ ] 5.7a `list_chunks` reports the recorded length for a table piece carrying a prefix,
       and reads no blobs while doing so.
-- [ ] 5.8 A table with a cell spanning rows is never cut between those rows.
-- [ ] 5.8a A table with no header, rendered in a form that requires a header line: every
-      piece still parses as a table in that form.
-- [ ] 5.9 Composition, not slicing: pieces are byte-identical to
-      `render_prefix + rows + render_suffix`, and no piece is a slice of `extracted_text`
-      taken at cell-span positions.
+- [ ] 5.8 Cover *Rows joined by a merged cell stay together*.
+- [ ] 5.8a Cover *A table with no header cells*, in a form that requires a header line:
+      every piece still parses as a table in that form.
+- [ ] 5.9 Cover *Pieces are composed, not sliced*: a piece is byte-identical to the fragment
+      for its rows, and no piece is a slice of `extracted_text` taken at cell-span
+      positions.
 
 ## 6. Evidence
 
