@@ -83,11 +83,8 @@
       `docs/`, including the note that `analysis_blob_ref` is null for documents extracted
       before this change.
 - [x] 5.2 Note the storage-volume implication of `analysis.json` for table-heavy corpora.
-- [ ] 5.3 Add the row to `openspec/provenance.md`. **Deferred, not skipped:** that table
-      indexes tickets to the capabilities carrying them, and its stated purpose is to
-      record work that has been through the loop. This change has no Jira key yet and is
-      not archived, so the row belongs at archive time. Nothing to drop from "known gaps"
-      — this loss was never recorded there.
+- [x] 5.3 Provenance row — dropped by decision: the index tracks Jira-keyed work, and
+      this change has no ticket.
 
 ## Deviations and gaps
 
