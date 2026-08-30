@@ -31,12 +31,10 @@ When a table exceeds the chunk size:
    there produces fragments that are not tables. On a real Document Intelligence response
    the min-to-max span over row 0's cells is `Budget Summary`, where the row's rendering is
    `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`.
-2. Compose each piece as `render_prefix + its rows + render_suffix`. Because the prefix
-   carries the table's leading header rows, every piece — including the first — is a valid
-   table with its header, by concatenation alone. A table whose header is not its leading
-   rows has an empty header in the prefix and its pieces carry none, which is the honest
-   outcome: repeating a mid-table header would assert a relationship the rendering does not
-   show.
+2. Compose each piece as `render_prefix + its rows + render_suffix`. The prefix is
+   everything the extractor's rendering places before the first body row, so every piece is
+   a valid table in that form by concatenation alone — including for a form like a Markdown
+   pipe table, which cannot express a table without a header line and its delimiter.
 3. Never cut between a row and one marked as continuing from it, so a cell spanning several
    rows stays with the rows it covers.
 4. Record the row range each piece covers.
@@ -67,10 +65,20 @@ rest, because a uniform rule is worth more than saving one special case. Content
 from elsewhere is recorded separately: the piece carries the source range of the prefix it
 was given, and a flag saying it carries one.
 
-This has one consumer today. `list_chunks.py` computes `char_count = end_char - start_char`,
-which would under-report the length of any piece carrying a repeated header. It must derive
-the count from the chunk's text instead. That is the kind of thing that would otherwise be
-found months later as "the character counts look slightly wrong for tables".
+This has one consumer today, and fixing it is not as simple as it first looks.
+`list_chunks.py` computes `char_count = end_char - start_char`, which under-reports any
+piece carrying a repeated header. But it cannot recompute the length from the text: it
+serves a paginated listing from `ChunkIndex` rows in SQL, which carry `text_preview` — a
+truncation — and never read the chunk blobs. "Derive it from the text" would turn one
+indexed query into a blob fetch per chunk on every page of every listing.
+
+So the length is **recorded when the chunk is created**, where the composed text is already
+in hand, and `list_chunks` reads it. This also removes a subtraction that was only ever
+correct by coincidence.
+
+The backfill is exact rather than approximate: every chunk that exists today is a verbatim
+slice, so `end_char - start_char` *is* its length, and the migration can set the new column
+from the existing offsets with no re-chunking.
 
 The alternative — keeping offsets exact by not repeating the header — sacrifices the
 property that makes a piece independently interpretable, which is the point of the change.
@@ -125,9 +133,12 @@ this design pushes into the extractor.
 
 Two consequences follow, and both are stated as requirements rather than left implicit:
 
-- **Every piece is a complete table in its own right.** With the header rows repeated, a
-  piece is valid in the extractor's rendering and interpretable alone. "One table divided"
-  is not a licence for pieces that only make sense reassembled.
+- **Every piece is a complete table in its own right.** With the opening rendering
+  repeated, a piece is valid in the extractor's form and interpretable alone. "One table
+  divided" is not a licence for pieces that only make sense reassembled.
+- **"Exactly once" applies to body rows.** Whatever the opening rendering carries — markup,
+  a header row, a delimiter — appears in every piece by design. The rule that no row is
+  duplicated is about the rows being divided, not about the frame around them.
 - **The pieces share the table's identity.** All carry the same `table_id`, distinguished
   by their row range, so a consumer can tell that several chunks are one table without
   comparing their text.

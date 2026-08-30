@@ -95,22 +95,36 @@ Document Intelligence marks header cells individually and they are conventionall
 necessarily, the leading rows; a table with `columnHeader` cells only in row 3 yields
 `header_rows == [3]`. The adapter reports what it finds rather than assuming row 0.
 
-**`header_rows` and what the prefix repeats are not the same set.** `render_prefix` carries
-the opening markup plus the *leading contiguous run* of header rows — rows 0..k where every
-one of them is a header row — which may be empty. A header row outside that run stays an
-ordinary body row: it is reported in `header_rows`, because that is what the provider found,
-and it is not repeated into every piece.
+**`header_rows` and what the prefix carries are not the same set.** `render_prefix` is
+defined structurally, not semantically: it is exactly the part of `rendered` that precedes
+the first body row — whatever the form requires there. `rows` is the remainder, and
+`render_suffix` is whatever follows the last row.
 
-The two must be distinguished or the model contradicts itself. Take `header_rows == [3]`. If
-the prefix carried row 3, then the prefix followed by the body rows would render 3, 0, 1, 2,
-4… — a different document from the one the extractor produced, and a direct violation of the
-exactness rule two decisions above. Restricting the prefix to the leading run keeps
-concatenation order-preserving, so exactness holds by construction rather than by luck.
+For HTML that is `<table>` plus any leading `<tr>` header rows. For a Markdown pipe table it
+is the header line *and* its delimiter line, because GFM has no headerless table: a
+fragment without `|---|` is not a table, it is four lines of text with pipes in them. A
+definition of the prefix as "opening markup plus header rows" cannot express that, and a
+table with no semantic header would produce fragments that are invalid in the very form the
+extractor chose.
 
-It also keeps repetition honest. Repeating a mid-table header into a piece that holds rows
-10–20 asserts that those rows sit under that header, which for a row-3 header of an
-irregular table is a guess. Repeating the leading run asserts only what the rendering
-already shows.
+Two consequences, both stated rather than left to be discovered:
+
+- **The prefix may carry a row, and that row is repeated in every piece.** In a pipe table
+  the first line is structurally the header whether or not the provider called it one. This
+  is the rendering's doing, not the chunker's: the extractor already had to put something on
+  that line to produce a valid table at all. What the prefix carries is recorded, so a
+  consumer can tell which rows are repeated rather than infer it.
+- **`header_rows` stays semantic and independent.** It reports the rows the provider marked
+  as headers, whether they sit in the prefix or among the body rows. A table with
+  `header_rows == [3]` keeps row 3 as an ordinary body row in document order — it is not
+  hoisted into the prefix, because hoisting it would reorder the document and break the
+  exactness rule, and because repeating a mid-table header into a piece holding rows 10–20
+  asserts a relationship the rendering does not show.
+
+Defining the prefix as a partition of the rendering rather than as a semantic construct is
+what makes both properties hold at once: exactness, because concatenation is order-preserving
+by construction, and validity, because the prefix is by definition everything the form needs
+before its rows.
 
 ## Decision: units are recorded, never normalised
 

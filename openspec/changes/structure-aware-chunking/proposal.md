@@ -48,7 +48,10 @@ blocks rather than from a regex.
   verbatim slice of the extracted text, so `start_char`/`end_char` are restated as the
   range the chunk's own rows occupy, with the prepended header's range recorded separately.
   One consumer is affected today — `list_chunks` derives a character count by subtracting
-  the offsets — and is corrected here rather than left to be discovered.
+  the offsets. It cannot simply measure the text instead: it serves a paginated listing from
+  index rows that carry only a preview. The composed length is therefore recorded when the
+  chunk is created and read from the index, with a migration that backfills it exactly from
+  the existing offsets.
 - **Table chunks carry the extractor's rendering.** Chunk text comes from the canonical
   `rendered` string, so what is embedded and what is shown is whatever form the extractor
   produced, and the pipeline stops caring which.

@@ -70,27 +70,36 @@ are the same regardless of which service produced them.
 #### Scenario: Part of a table can be rendered without knowing the markup
 
 - **WHEN** a consumer needs to emit only some rows of a table
-- **THEN** the table provides an opening rendering that includes its leading header rows, a
-  closing rendering, and each body row's own rendering, such that concatenating the opening,
-  any selection of body rows, and the closing yields a valid table in the extractor's form
+- **THEN** the table provides an opening rendering, a closing rendering, and each body row's
+  own rendering, such that concatenating the opening, any selection of body rows, and the
+  closing yields a valid table in the extractor's form
 
-#### Scenario: Only leading header rows are carried in the opening rendering
+#### Scenario: The opening rendering is everything before the first body row
 
-- **WHEN** a table's header rows are the first rows of the table
-- **THEN** the opening rendering carries them, and the body rows are the remainder in order
+- **WHEN** a table's renderings are produced
+- **THEN** the opening rendering is exactly the part of the table's rendering that precedes
+  its first body row — whatever that form requires there — and the body rows are the
+  remainder in document order
+
+#### Scenario: A form that requires a header line
+
+- **WHEN** the extractor renders tables in a form that cannot express a table without a
+  header line, such as a Markdown pipe table with its delimiter row
+- **THEN** the opening rendering carries that line and its delimiter, so that every emitted
+  fragment is a valid table in that form, including for a table the provider marked as
+  having no header
+
+#### Scenario: Rows carried in the opening rendering are identified
+
+- **WHEN** the opening rendering carries one or more of the table's rows
+- **THEN** the table records which rows those are, so a consumer knows which rows are
+  repeated in every fragment rather than inferring it from the rendering
 
 #### Scenario: A header row that is not a leading row
 
-- **WHEN** a table reports a header row that does not belong to the leading run of header
-  rows
+- **WHEN** a table reports a header row that is not carried in the opening rendering
 - **THEN** it is still reported as a header row, and it remains an ordinary body row in
   document order rather than being moved into the opening rendering
-
-#### Scenario: A table whose first row is not a header
-
-- **WHEN** no leading row of a table is a header row
-- **THEN** the opening rendering carries only the table's opening markup, and every row is a
-  body row
 
 #### Scenario: The parts reconstruct the whole exactly
 

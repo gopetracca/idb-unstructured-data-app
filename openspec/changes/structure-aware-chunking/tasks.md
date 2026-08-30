@@ -37,9 +37,13 @@
       which will no longer be true.
 - [ ] 4.3 Restate `start_char`/`end_char` on `Chunk` and `ChunkIndex` as provenance of the
       chunk's own content, and add the prepended-header source range and flag.
-- [ ] 4.4 Fix `list_chunks.py:59`, which computes `char_count = end_char - start_char` and
-      would under-report any piece carrying a repeated header. Take the length from the
-      text.
+- [ ] 4.4 Record the composed text's length on `Chunk` and `ChunkIndex` when the chunk is
+      created, and persist it — `list_chunks` serves a paginated listing from index rows
+      carrying only `text_preview`, so it cannot recompute a length without a blob fetch per
+      chunk. Add the column and a migration; backfill it from `end_char - start_char`, which
+      is exact for every chunk that exists today because all of them are verbatim slices.
+- [ ] 4.4a Change `list_chunks.py:59` to report the recorded length instead of subtracting
+      offsets.
 - [ ] 4.5 Audit every other reader of these offsets for the same assumption before
       changing their meaning.
 
@@ -63,7 +67,11 @@
       and all pieces share one `table_id` with distinct row ranges.
 - [ ] 5.7 Offsets: a prose chunk's text equals the slice at its offsets; a table piece with a
       repeated header does not, and records the header's source range and the flag instead.
+- [ ] 5.7a `list_chunks` reports the recorded length for a table piece carrying a repeated
+      header, and reads no blobs while doing so.
 - [ ] 5.8 A table with a cell spanning rows is never cut between those rows.
+- [ ] 5.8a A table with no header, rendered in a form that requires a header line: every
+      piece still parses as a table in that form.
 - [ ] 5.9 Composition, not slicing: pieces are byte-identical to
       `render_prefix + rows + render_suffix`, and no piece is a slice of `extracted_text`
       taken at cell-span positions.

@@ -80,8 +80,16 @@ between rows and repeating the table's header rows in every piece.
 #### Scenario: A split table is one table, not a table and copies of it
 
 - **WHEN** a table is split into several chunks
-- **THEN** no further chunk containing the whole table is emitted, and each row of the table
-  appears in exactly one piece, so the pieces cover the table once rather than duplicating it
+- **THEN** no further chunk containing the whole table is emitted, and each of the table's
+  body rows appears in exactly one piece, so the pieces cover the table once rather than
+  duplicating it
+
+#### Scenario: The repeated frame is not a duplicated row
+
+- **WHEN** the extractor's opening rendering carries a header row or a delimiter, and a
+  table is split
+- **THEN** that opening appears in every piece, and this does not count as duplicating a body
+  row
 
 #### Scenario: Pieces are attributable to one table
 
@@ -121,11 +129,18 @@ text, and SHALL NOT be relied upon as an instruction for slicing that text.
 - **THEN** its offsets delimit the rows the piece itself covers, and the piece additionally
   records the source range of the prepended header and that it carries one
 
-#### Scenario: Length is taken from the text
+#### Scenario: Length is recorded, not recomputed
 
-- **WHEN** a consumer reports a chunk's character count
-- **THEN** it is derived from the chunk's text rather than from the difference between its
+- **WHEN** a chunk is created
+- **THEN** the length of its composed text is recorded on the chunk index, so a consumer
+  listing chunks reports it without reading the chunk's content and without subtracting its
   offsets, which excludes any prepended content
+
+#### Scenario: Listing chunks does not read their content
+
+- **WHEN** chunks are listed
+- **THEN** the response is served from indexed records alone, as before, and reports each
+  chunk's recorded length
 
 ## MODIFIED Requirements
 

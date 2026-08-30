@@ -11,9 +11,10 @@
 - [ ] 1.2 Replace `TableCell.kind: str` with `role: CellRole`, keeping `kind` readable as
       a deprecated alias so a pre-change `text.json` still loads.
 - [ ] 1.3 Add to `ExtractedTable`: `header_rows: list[int]`, `rendered: str`,
-      `render_prefix: str` (opening markup plus the *leading contiguous run* of header
-      rows, possibly none), `render_suffix: str`, and `rows: list[TableRow]` holding every
-      remaining row in document order.
+      `render_prefix: str` (exactly the part of the rendering preceding the first body
+      row), `prefix_row_indices: list[int]` (the rows, if any, the prefix carries),
+      `render_suffix: str`, and `rows: list[TableRow]` holding the remainder in document
+      order.
 - [ ] 1.3a Add `TableRow`: `row_index`, `rendered`, `source_range: tuple[int, int] | None`,
       `continues_from_row: int | None`.
 - [ ] 1.4 Add `blocks: list[ContentBlock]` to `MarkdownOutput`, defaulting to empty.
@@ -72,6 +73,9 @@
 - [ ] 5.2c A table whose header row is not its first row: `header_rows` reports it, the
       opening rendering does not carry it, it stays a body row in document order, and the
       exactness rule still holds.
+- [ ] 5.2d A table with no header at all, in a form that requires a header line: the opening
+      rendering still carries that line and its delimiter, every fragment parses as a table
+      in that form, and `prefix_row_indices` names the row being repeated.
 - [ ] 5.3 A contract test that any extractor adapter must pass — offset invariant, canonical
       roles, header rows, the exactness rule, and composability of an arbitrary row subset
       into a valid table — parameterised over the adapters that exist, so a future Docling
