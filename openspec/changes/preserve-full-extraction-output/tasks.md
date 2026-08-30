@@ -168,3 +168,15 @@ references, and a run either publishes both outputs or publishes nothing.
 This changes two things previously specified: the text output path
 (`{tenant_id}/{file_id}/text/{run}.json`) and consequently the shape of `markdown_url` in
 the `202` response. Both are captured in the `content-extraction` delta and `docs/`.
+
+## Follow-up from review (fifth pass)
+
+- **Concurrent runs leaked the loser's outputs.** Each run swept the pair it had observed
+  before starting, so two overlapping runs that both observed P would both delete P, and
+  whichever published first would leave its own outputs unreachable and never swept.
+  `update_blob_references` now returns what it displaced, read inside the transaction that
+  writes (under `WITH (UPDLOCK, ROWLOCK)`), and each run sweeps that. Covered at both
+  levels: the interleaving test asserts only the published pair survives, and the SQL
+  Server tests pin the returned values for a first write, a replacement, a clear, and an
+  unknown document. Verified the unit test catches the leak — restoring the
+  observed-at-start sweep makes it fail with the losing run's text blob left behind.

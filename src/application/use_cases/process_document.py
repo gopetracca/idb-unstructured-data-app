@@ -15,6 +15,7 @@ from src.application.ports.document_intelligence import DocumentIntelligencePort
 from src.application.ports.pipeline_store import PipelineStorePort
 from src.application.ports.processing_events import ProcessingEventsPort
 from src.config.settings import get_settings
+from src.core.entities.document import ReplacedBlobReferences
 from src.core.entities.document_analysis import MarkdownOutput
 from src.core.entities.pipeline_state import ProcessingStage
 from src.core.errors import (
@@ -114,12 +115,6 @@ class ProcessDocumentUseCase:
 
             source_blob_path = doc.document.raw_blob_ref
 
-            # What this document's outputs currently point at, if anything. Kept so this
-            # run can sweep them once it has published its own, and so a run that never
-            # publishes can leave them exactly as it found them.
-            previous_text_ref = doc.document.text_blob_ref
-            previous_analysis_ref = doc.document.analysis_blob_ref
-
             # Everything this run writes is namespaced under one identifier, so no output
             # of a concurrent or later run can land on top of it and no two runs' outputs
             # can be mistaken for each other.
@@ -201,7 +196,7 @@ class ProcessDocumentUseCase:
             # Until this lands, everything above is invisible: the row is the only way to
             # locate any of it.
             try:
-                await self._pipeline_store.update_blob_references(
+                replaced = await self._pipeline_store.update_blob_references(
                     tenant_id=request.tenant_id,
                     file_id=request.file_id,
                     text_blob_ref=output_blob_path,
@@ -216,12 +211,15 @@ class ProcessDocumentUseCase:
                 )
                 raise
 
-            # The outputs this run replaced are unreachable now that the references have
-            # moved past them.
+            # Sweep what this publish displaced — as reported by the update itself, not
+            # as observed before the run started. Two overlapping runs both see the same
+            # outputs at the start, so sweeping those would delete the same pair twice and
+            # leave whichever run published first leaking its own, unreachable outputs.
+            replaced = replaced or ReplacedBlobReferences()
             await self._discard_run_outputs(
                 request,
-                previous_analysis_ref,
-                previous_text_ref,
+                replaced.analysis_blob_ref,
+                replaced.text_blob_ref,
                 keep={output_blob_path, analysis_blob_path},
             )
 

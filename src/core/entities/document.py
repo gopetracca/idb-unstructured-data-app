@@ -10,6 +10,19 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 
+class ReplacedBlobReferences(BaseModel):
+    """The blob references a reference update overwrote.
+
+    Returned by the update rather than read beforehand: between reading and writing,
+    another extraction of the same document can publish, and a run that swept what it saw
+    at the start would delete that run's outputs while leaking its own. Only the update
+    itself knows what it actually displaced.
+    """
+
+    text_blob_ref: str | None = Field(default=None)
+    analysis_blob_ref: str | None = Field(default=None)
+
+
 class Document(BaseModel):
     """Document identity and storage — maps to `files` table.
 

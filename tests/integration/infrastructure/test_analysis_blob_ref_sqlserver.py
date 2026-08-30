@@ -164,3 +164,78 @@ class TestAnalysisBlobRefIsNotLeftStale:
         assert stored.document.analysis_blob_ref is None
         assert stored.document.text_blob_ref == text_path
         assert stored.document.raw_blob_ref == f"{TENANT}/{file_id}/report.pdf"
+
+
+class TestTheUpdateReportsWhatItDisplaced:
+    """Cleanup depends on this being the row's state at write time, not at read time."""
+
+    async def test_first_write_displaces_nothing(
+        self, repository: DocumentRepositorySQLServer, stored_document: DocumentComplete
+    ):
+        file_id = stored_document.document.file_id
+
+        replaced = await repository.update_blob_references(
+            tenant_id=TENANT,
+            file_id=file_id,
+            text_blob_ref=f"{TENANT}/{file_id}/text/run-1.json",
+            analysis_blob_ref=f"{TENANT}/{file_id}/analysis/run-1.json",
+        )
+
+        assert replaced.text_blob_ref is None
+        assert replaced.analysis_blob_ref is None
+
+    async def test_a_later_write_reports_the_pair_it_replaced(
+        self, repository: DocumentRepositorySQLServer, stored_document: DocumentComplete
+    ):
+        file_id = stored_document.document.file_id
+        first = (
+            f"{TENANT}/{file_id}/text/run-1.json",
+            f"{TENANT}/{file_id}/analysis/run-1.json",
+        )
+        await repository.update_blob_references(
+            tenant_id=TENANT,
+            file_id=file_id,
+            text_blob_ref=first[0],
+            analysis_blob_ref=first[1],
+        )
+
+        replaced = await repository.update_blob_references(
+            tenant_id=TENANT,
+            file_id=file_id,
+            text_blob_ref=f"{TENANT}/{file_id}/text/run-2.json",
+            analysis_blob_ref=f"{TENANT}/{file_id}/analysis/run-2.json",
+        )
+
+        assert (replaced.text_blob_ref, replaced.analysis_blob_ref) == first
+        stored = await repository.get_by_id(TENANT, file_id)
+        assert stored.document.text_blob_ref.endswith("run-2.json")
+
+    async def test_clearing_reports_the_analysis_it_removed(
+        self, repository: DocumentRepositorySQLServer, stored_document: DocumentComplete
+    ):
+        file_id = stored_document.document.file_id
+        analysis = f"{TENANT}/{file_id}/analysis/run-1.json"
+        await repository.update_blob_references(
+            tenant_id=TENANT, file_id=file_id, analysis_blob_ref=analysis
+        )
+
+        replaced = await repository.update_blob_references(
+            tenant_id=TENANT,
+            file_id=file_id,
+            text_blob_ref=f"{TENANT}/{file_id}/text/run-2.json",
+            clear_analysis_blob_ref=True,
+        )
+
+        assert replaced.analysis_blob_ref == analysis
+        stored = await repository.get_by_id(TENANT, file_id)
+        assert stored.document.analysis_blob_ref is None
+
+    async def test_an_unknown_document_displaces_nothing(
+        self, repository: DocumentRepositorySQLServer
+    ):
+        replaced = await repository.update_blob_references(
+            tenant_id=TENANT, file_id="does-not-exist", text_blob_ref="x"
+        )
+
+        assert replaced.text_blob_ref is None
+        assert replaced.analysis_blob_ref is None

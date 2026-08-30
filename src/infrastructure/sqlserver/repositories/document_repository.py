@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.application.dto.file_index_filters import FileIndexFilters
 from src.core.entities.composites import DocumentComplete, DocumentWithPipeline
-from src.core.entities.document import Document
+from src.core.entities.document import Document, ReplacedBlobReferences
 from src.core.entities.pipeline_state import OverallStatus, PipelineState, ProcessingStage
 from src.core.value_objects.document_metadata import DocumentMetadata
 from src.infrastructure.sqlserver.models.file_metadata_model import FileMetadataTable
@@ -311,17 +311,29 @@ class DocumentRepositorySQLServer:
         text_blob_ref: str | None = None,
         analysis_blob_ref: str | None = None,
         clear_analysis_blob_ref: bool = False,
-    ) -> None:
-        """Update blob storage references for a file (on the files table)."""
+    ) -> ReplacedBlobReferences:
+        """Update blob storage references for a file (on the files table).
+
+        Returns what this update displaced, read inside the same transaction as the write
+        so it reflects the row this update actually replaced rather than whatever a caller
+        happened to read earlier.
+        """
         async with self._session_factory() as session:
             stmt = (
                 sa.select(FileTable)
                 .where(FileTable.tenant_id == tenant_id, FileTable.file_id == file_id)
+                .with_for_update()
             )
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()
             if row is None:
-                return
+                return ReplacedBlobReferences()
+
+            replaced = ReplacedBlobReferences(
+                text_blob_ref=row.text_blob_ref,
+                analysis_blob_ref=row.analysis_blob_ref,
+            )
+
             if raw_blob_ref is not None:
                 row.raw_blob_ref = raw_blob_ref
             if text_blob_ref is not None:
@@ -330,9 +342,10 @@ class DocumentRepositorySQLServer:
                 row.analysis_blob_ref = analysis_blob_ref
             elif clear_analysis_blob_ref:
                 # A re-run that stored no sidecar must not leave the row pointing at the
-                # previous run's analysis.json, which no longer describes this text.json.
+                # previous run's analysis, which no longer describes this run's text.
                 row.analysis_blob_ref = None
             await session.commit()
+            return replaced
 
     async def query_by_status(
         self,

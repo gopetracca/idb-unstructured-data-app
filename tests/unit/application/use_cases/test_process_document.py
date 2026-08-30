@@ -13,7 +13,7 @@ from src.application.dto.document_analysis import (
 )
 from src.application.use_cases.process_document import ProcessDocumentUseCase
 from src.core.entities.composites import DocumentWithPipeline
-from src.core.entities.document import Document
+from src.core.entities.document import Document, ReplacedBlobReferences
 from src.core.entities.document_analysis import (
     ExtractionMetadata,
     MarkdownOutput,
@@ -665,7 +665,12 @@ class StatefulBlobReferences:
         clear_analysis_blob_ref=False,
     ):
         # Mirrors DocumentRepositorySQLServer: None means "leave alone", clearing is
-        # explicit. The SQL Server tests pin that this mirror is faithful.
+        # explicit, and the update reports what it displaced. The SQL Server tests pin
+        # that this mirror is faithful.
+        replaced = ReplacedBlobReferences(
+            text_blob_ref=self.text_blob_ref,
+            analysis_blob_ref=self.analysis_blob_ref,
+        )
         if raw_blob_ref is not None:
             self.raw_blob_ref = raw_blob_ref
         if text_blob_ref is not None:
@@ -674,6 +679,7 @@ class StatefulBlobReferences:
             self.analysis_blob_ref = analysis_blob_ref
         elif clear_analysis_blob_ref:
             self.analysis_blob_ref = None
+        return replaced
 
 
 class TestReprocessingADocumentThatAlreadyHasASidecar:
@@ -1203,3 +1209,61 @@ class TestConcurrentExtractionsOfTheSameDocument:
         published_analysis = json.loads(blobs.blobs[store.analysis_blob_ref])["run"]
         assert published_text == f"text from {published_analysis}"
         assert published_analysis == "run-a"
+
+    async def test_the_losing_run_leaves_nothing_behind(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+    ):
+        """B publishes, then A publishes over it. B's outputs must not leak.
+
+        Each run sweeps what its own publish displaced, reported by the update itself. A
+        run that swept what it saw before starting would delete the outputs both runs
+        observed — twice — and never touch the pair the other run published in between.
+        """
+        b_has_published = asyncio.Event()
+        a_has_written_outputs = asyncio.Event()
+        real_update = store.update_blob_references
+
+        async def update_blob_references(*args, **kwargs):
+            marker = json.loads(blobs.blobs[kwargs["text_blob_ref"]])["extracted_text"]
+            if marker.endswith("run-a"):
+                await b_has_published.wait()
+            replaced = await real_update(*args, **kwargs)
+            if marker.endswith("run-b"):
+                b_has_published.set()
+            return replaced
+
+        store.update_blob_references = update_blob_references
+
+        original_upload = blobs.upload_blob
+
+        async def upload_blob(container, blob_path, data, content_type=None, **kwargs):
+            result = await original_upload(container, blob_path, data, content_type, **kwargs)
+            if "run-a" in str(data) and blob_path.startswith(
+                text_prefix(request_.tenant_id, request_.file_id)
+            ):
+                a_has_written_outputs.set()
+            return result
+
+        blobs.upload_blob = upload_blob
+
+        async def run(marker: str, wait_for_a: bool):
+            if wait_for_a:
+                await a_has_written_outputs.wait()
+            use_case = build_use_case(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, marker),
+                persist_raw_analysis=True,
+            )
+            return await use_case.execute(request_)
+
+        await asyncio.gather(run("run-a", False), run("run-b", True))
+
+        # Only the published pair survives: run B's outputs, displaced by A, are gone.
+        assert set(blobs.blobs) == {store.text_blob_ref, store.analysis_blob_ref}
