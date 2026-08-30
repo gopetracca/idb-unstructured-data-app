@@ -8,11 +8,19 @@ on:
   push:
     branches:
       - develop
+    # Documentation-only changes do not affect the built artifact, so they do
+    # not run the pipeline. Keep .github/** OUT of this list: a workflow change
+    # must exercise itself. A docs-only push therefore leaves the deployed
+    # revision as it is, which is correct: nothing in the image changed.
     paths-ignore:
       - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
+      - 'openspec/**'
+      - '**.md'
       - '**.txt'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.vscode/**'
+      - '.idea/**'
 
   workflow_dispatch:
 
