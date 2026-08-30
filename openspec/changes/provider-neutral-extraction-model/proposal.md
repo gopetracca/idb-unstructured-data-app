@@ -36,12 +36,12 @@ whatever produced it.
 Introduce a canonical extraction model that the `convert` stage emits and downstream
 stages consume, so no consumer knows or cares which service produced it.
 
-- **An ordered block list.** `ExtractedDocument` carries the rendered `text` plus `blocks`
-  in reading order — heading, paragraph, table, figure, caption, list item — each with the
-  character range it occupies **in that text**, a page number, and geometry where the
-  provider supplies it.
+- **An ordered block list.** `MarkdownOutput` — the type the stage already returns — gains
+  `blocks` in reading order beside the existing `extracted_text`: heading, paragraph,
+  table, figure, caption, list item, each with the character range it occupies **in that
+  text**, a page number, and geometry where the provider supplies it.
 - **The offset invariant is the adapter's job.** Every block's `(start, end)` must resolve
-  against `text`. Azure Document Intelligence gives those offsets directly; a Docling
+  against `extracted_text`. Azure Document Intelligence gives those offsets directly; a Docling
   adapter renders the text itself and records offsets as it emits. Downstream code may
   rely on the invariant without knowing which happened.
 - **Normalised table structure.** A canonical `CellRole` (`content`, `column_header`,
@@ -50,7 +50,7 @@ stages consume, so no consumer knows or cares which service produced it.
   booleans both map onto it. Each table also carries `header_rows`: the row indices that
   form its header, computed by the adapter.
 - **The adapter renders, the consumer never parses — including for parts of a table.**
-  A table carries `rendered` (its text exactly as it appears in `text`) and, so that a
+  A table carries `rendered` (its text exactly as it appears in `extracted_text`) and, so that a
   consumer can emit *some rows* of it without knowing the markup: `render_prefix` (exactly
   the part of the rendering before the first body row), `render_suffix` (exactly the part
   after the last), and `rows` (the body rows, each with its own rendering). A fragment is
@@ -62,7 +62,7 @@ stages consume, so no consumer knows or cares which service produced it.
   the row's actual rendering is `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`. Slicing
   a table at cell spans yields fragments that are not tables.
 - **Rows carry their own provenance.** Each body row records where its rendering sits in
-  `text` when that range is contiguous, and records when a vertically merged cell makes it
+  `extracted_text` when that range is contiguous, and records when a vertically merged cell makes it
   inseparable from the row above — so a consumer can find a legal cut point without
   reasoning about markup or spans.
 - **Explicit geometry units.** Document Intelligence reports inches from a top-left
@@ -80,6 +80,15 @@ This change defines the contract and makes the Azure adapter satisfy it. It does
 implement a Docling adapter — but the mapping is specified in `design.md` for both
 providers, because a contract that has only ever been satisfied by one implementation is a
 contract in name only.
+
+## A name this change does not fix
+
+`MarkdownOutput` is a poor name for what it now holds — a structured document with blocks,
+tables and geometry, of which the markdown is one field. Renaming it to something like
+`ExtractedDocument` would be an improvement and is deliberately **not** part of this change:
+`add-docling-extraction-adapter` is in flight against `MarkdownOutput` by name, and a rename
+would turn a clean parallel change into a collision for no functional gain. Worth doing once
+both have landed.
 
 ## Relationship to `add-docling-extraction-adapter`
 
