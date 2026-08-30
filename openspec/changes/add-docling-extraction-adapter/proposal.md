@@ -41,11 +41,14 @@ evidence behind it.
   the structured tables, figures, paragraphs, sections, spans, and per-page geometry that
   `preserve-full-extraction-output` added. Docling's `DoclingDocument` carries all of these
   natively; the mapping is a projection, not a reconstruction.
-- **Raw-artifact parity.** When raw persistence is on, the adapter writes the serialised
-  `DoclingDocument` to `{tenant_id}/{file_id}/analysis.json`. The two adapters produce
-  different raw shapes, so `extraction_metadata` gains `analysis_format`
-  (`azure-document-intelligence-analyze-result` or `docling-document`) — a reader must
-  never have to guess which schema it is holding.
+- **Raw-artifact parity, on the existing publication contract.** When raw persistence is
+  on, the adapter supplies the serialised `DoclingDocument` and the existing stage writes
+  it to that run's analysis path and publishes `analysis_blob_ref` alongside
+  `text_blob_ref` in one update. Paths stay run-scoped and the SQL references stay the only
+  locator; the engine choice changes what is written, never where or how it is published.
+  The two adapters produce different raw shapes, so `extraction_metadata` gains
+  `analysis_format` (`azure-document-intelligence-analyze-result` or `docling-document`) —
+  a reader must never have to guess which schema it is holding.
 - **Raw-persistence configuration made engine-neutral.** Whether the verbatim analysis is
   stored is a property of the extraction stage, not of Azure, but it is currently spelled
   `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` and read straight off the Document
@@ -54,8 +57,8 @@ evidence behind it.
   existing one honoured so deployed configuration does not break.
 - **`extraction_method` becomes meaningful.** It already exists and is hard-coded to
   `azure-document-intelligence`; the Docling adapter sets `docling`, so a stored
-  `text.json` records which engine produced it. This is the migration story: mixed corpora
-  are legible, not ambiguous.
+  a stored text output records which engine produced it. This is the migration story: mixed
+  corpora are legible, not ambiguous.
 - **Offline model artifacts baked at build time.** The image sets `HF_HUB_OFFLINE=1` and
   the VNet restricts egress (AIA-416). Docling's layout and table-structure models must be
   prefetched into the image with `docling-tools models download` and addressed via
@@ -95,17 +98,26 @@ chunking, vectorization, or search behaviour; GPU inference; Docling's VLM pipel
   working code, so the contract this change fills is real rather than planned: the enriched
   `MarkdownOutput` with `tables`, `figures`, `paragraphs`, `sections`, `styles`,
   `key_value_pairs`, `content_format`, and `model_id`; `TextSpan` and `BoundingRegion`;
-  `analysis.json` and the `analysis_blob_ref` column. Two details of how it landed shape
+  the run-scoped analysis sidecar and the `analysis_blob_ref` column. Three details of how
+  it landed shape
   this change and are worth stating, because they differ from how that proposal described
   the work:
   - **The port was not widened.** The verbatim payload rides on
     `MarkdownOutput.raw_analysis: dict[str, Any] | None`, declared `exclude=True` so it
-    never reaches `text.json`. That is already engine-neutral — the Docling adapter sets
+    never reaches the serialised text output. That is already engine-neutral — the Docling adapter sets
     the field with `DoclingDocument.export_to_dict()` and the use case persists it
     unchanged. No port or use-case signature has to move.
   - **`tests/support/table_reconstruction.assert_cells_tile_grid` takes the domain
     `ExtractedTable`,** not an Azure type, so a Docling-produced table can be held to
     exactly the same reconstruction bar. The cross-engine contract test is close to free.
+  - **Neither `text.json` nor `analysis.json` is a real path.** Each run writes
+    `{tenant_id}/{file_id}/text/{run_id}.json` and
+    `{tenant_id}/{file_id}/analysis/{run_id}.json`, publishes both references in a single
+    `update_blob_references`, and then sweeps what that update reports it displaced. The
+    run scoping is what stops two concurrent extractions of one document overwriting each
+    other, and the single publish is what stops the row pairing one run's text with
+    another's analysis. This change inherits that protocol wholesale and must not
+    reintroduce a fixed path.
 - **Affected code:**
   - `src/config/settings.py` — `EXTRACTION_ADAPTER`, new `DoclingSettings`
   - `src/container.py` — `_create_document_intelligence_adapter` gains the branch

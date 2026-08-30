@@ -36,11 +36,11 @@ unavailable fields empty rather than approximating them.
 #### Scenario: Contract satisfied by Docling
 
 - **WHEN** Docling extracts a document
-- **THEN** `text.json` carries `extracted_text`, per-page text, word counts and geometry, tables with cell row/column indices and header flags, figures, paragraphs with roles, sections, and per-item bounding regions, in the same shape the Azure adapter produces
+- **THEN** the run's text output carries `extracted_text`, per-page text, word counts and geometry, tables with cell row/column indices and header flags, figures, paragraphs with roles, sections, and per-item bounding regions, in the same shape the Azure adapter produces
 
 #### Scenario: Chunking is unaffected by the engine
 
-- **WHEN** the chunking stage reads a `text.json` produced by Docling
+- **WHEN** the chunking stage reads a text output produced by Docling, located through the document's `text_blob_ref`
 - **THEN** it reads `extracted_text` and chunks successfully, with no engine-specific handling
 
 #### Scenario: Fields with no engine equivalent
@@ -65,18 +65,43 @@ analysis uses, so a mixed corpus is unambiguous.
 
 #### Scenario: Raw analysis schema recorded
 
-- **WHEN** a raw analysis artifact is stored at `{tenant_id}/{file_id}/analysis.json`
+- **WHEN** a raw analysis artifact is stored for a run
 - **THEN** `extraction_metadata.analysis_format` names its schema, and a reader determines the schema from that value rather than from the blob path or by inspecting the payload
 
 #### Scenario: Docling raw analysis
 
 - **WHEN** Docling extracts a document and raw persistence is enabled
-- **THEN** the serialised `DoclingDocument` is written to `{tenant_id}/{file_id}/analysis.json`, `analysis_blob_ref` is recorded, and `analysis_format` is `docling-document`
+- **THEN** the serialised `DoclingDocument` is written to the run-scoped analysis path, published to `analysis_blob_ref` in the same update as the text reference, and `analysis_format` is `docling-document`
 
 #### Scenario: Output predating engine tagging
 
-- **WHEN** a `text.json` has no `analysis_format`
+- **WHEN** a text output has no `analysis_format`
 - **THEN** it is read as Azure Document Intelligence output and no error is raised
+
+### Requirement: Engine Choice Does Not Weaken Output Publication
+
+A new extraction engine SHALL use the existing run-scoped write and atomic publication
+contract unchanged, and SHALL NOT introduce a path any reader is expected to guess.
+
+#### Scenario: Outputs are run-scoped
+
+- **WHEN** any engine writes its text output and raw analysis
+- **THEN** both are written under paths unique to that run, so a concurrent extraction of the same document cannot overwrite what another run published
+
+#### Scenario: References are the only locator
+
+- **WHEN** a reader locates a document's text output or raw analysis
+- **THEN** it follows `text_blob_ref` and `analysis_blob_ref` on the document row, and no path is reconstructed by convention
+
+#### Scenario: The pair is published together
+
+- **WHEN** a run publishes its outputs
+- **THEN** both references move in one update, so the row never holds a text output from one run beside a raw analysis from another, whichever engine produced them
+
+#### Scenario: A failed or terminated run publishes nothing
+
+- **WHEN** a conversion fails, times out, or is terminated at its hard deadline
+- **THEN** nothing is published, only that run's own outputs are discarded, and the previously published pair remains referenced and intact
 
 ### Requirement: In-Process Conversion Is Terminable
 
@@ -97,7 +122,7 @@ message. Cancelling an awaitable SHALL NOT be relied on as the termination mecha
 #### Scenario: No overlap with a redelivered message
 
 - **WHEN** the hard deadline is configured
-- **THEN** it leaves enough of the queue visibility timeout for the stage's remaining work — blob writes and metadata updates — to finish, so no conversion is ever running at the moment its own message becomes visible again
+- **THEN** it leaves enough of the queue visibility timeout for the stage's remaining work — the run-scoped analysis and text writes, the reference publication, and the sweep of what it displaced — to finish, so no conversion is ever running at the moment its own message becomes visible again
 
 #### Scenario: Termination is proven, not assumed
 
@@ -132,7 +157,7 @@ progress, so that forced termination is the last resort rather than the normal p
 #### Scenario: Partial results are not stored as complete
 
 - **WHEN** a conversion reports partial success because a limit was reached
-- **THEN** the stage fails rather than storing a truncated `text.json`, so no document is silently indexed on incomplete text
+- **THEN** the stage fails and publishes nothing, so no document is silently indexed on incomplete text and the previously published pair stays current
 
 #### Scenario: Concurrency is bounded by memory, not by the queue
 

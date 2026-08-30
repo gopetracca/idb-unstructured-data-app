@@ -1,8 +1,9 @@
 # Tasks
 
 Sequencing note: §0 is a spike whose result decides whether §2 onward is worth doing.
-`preserve-full-extraction-output` is merged (PR #4), so the `MarkdownOutput`,
-`analysis.json`, and `analysis_blob_ref` that §3 fills already exist in code.
+`preserve-full-extraction-output` is merged (PR #4), so the `MarkdownOutput`, the
+run-scoped analysis sidecar, and `analysis_blob_ref` that §3 fills already exist in code —
+along with the atomic publication protocol §3 must not weaken.
 
 ## 0. Measure before committing
 
@@ -91,8 +92,8 @@ Sequencing note: §0 is a spike whose result decides whether §2 onward is worth
 - [ ] 3.5 Derive the hard deadline from the queue visibility timeout minus a margin for the
       stage's remaining work (blob writes, metadata update), so no conversion is running
       when its own message becomes visible again.
-- [ ] 3.6 Treat a partial-success conversion as a stage failure; never store a truncated
-      `text.json`.
+- [ ] 3.6 Treat a partial-success conversion as a stage failure so the run publishes
+      nothing and the last complete run stays current; never publish truncated text.
 - [ ] 3.7 Log kills distinctly from cooperative timeouts. A rising kill rate means the
       cooperative timeout is mis-tuned or admission control is too loose, and that should
       be visible rather than absorbed.
@@ -132,7 +133,10 @@ Sequencing note: §0 is a spike whose result decides whether §2 onward is worth
       `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` honoured, since it is presumably already
       set in deployed configuration, and document which wins if both are set.
 - [ ] 4.5 Confirm `process_document.py` needs no other change: `raw_analysis` is already
-      engine-neutral, so `analysis.json` and `analysis_blob_ref` work as-is.
+      engine-neutral, so the run-scoped write, the single-statement publish of
+      `text_blob_ref` and `analysis_blob_ref`, and the displaced-output sweep all work
+      as-is. Add no engine-specific path — a fixed `analysis.json` would reintroduce the
+      overwrite race this protocol exists to prevent.
 
 ## 5. Tests
 
@@ -161,19 +165,29 @@ Sequencing note: §0 is a spike whose result decides whether §2 onward is worth
       conversion succeeds on the respawned worker. A test that only asserts the coroutine
       raised would pass against the broken thread-executor design and is not sufficient.
 - [ ] 5.7 Assert the hard deadline is derived to leave margin inside the queue visibility
-      timeout, so the arithmetic cannot silently drift if `host.json` changes.
-- [ ] 5.8 Assert a worker killed mid-conversion, or dying of memory exhaustion, leaves the
+      timeout, covering the post-conversion work too — the two run-scoped writes, the
+      reference publish, and the sweep — so the arithmetic cannot silently drift if
+      `host.json` changes.
+- [ ] 5.8 Publication contract, with Docling configured: outputs land under run-scoped
+      paths; both references publish in one update; a terminated or failed run publishes
+      nothing and discards only its own writes, leaving the previous run's pair referenced
+      and intact. Mirror the existing coverage rather than inventing a parallel one — see
+      `tests/unit/application/use_cases/test_process_document.py`.
+- [ ] 5.9 Two overlapping Docling extractions of one document leave exactly one complete,
+      internally consistent pair referenced, and no unreachable blobs.
+- [ ] 5.10 Assert a worker killed mid-conversion, or dying of memory exhaustion, leaves the
       parent able to serve health probes and process the next message.
-- [ ] 5.9 Cross-engine contract test over `tests/support/sample_documents.build_sample_pdf`
+- [ ] 5.11 Cross-engine contract test over `tests/support/sample_documents.build_sample_pdf`
       — the document that already exercises a merged-header table: both adapters produce
       `MarkdownOutput` objects that validate against the same model, both pass
       `assert_cells_tile_grid`, and they agree on page and table count within a stated
       tolerance.
-- [ ] 5.10 Chunking regression: `chunk_document` over a Docling-produced `text.json`
-      chunks successfully with no engine-specific handling.
-- [ ] 5.11 `tests/unit/presentation/` — capabilities and supported-formats reflect the
+- [ ] 5.12 Chunking regression: `chunk_document` over a Docling-produced text output,
+      located through `text_blob_ref`, chunks successfully with no engine-specific
+      handling.
+- [ ] 5.13 `tests/unit/presentation/` — capabilities and supported-formats reflect the
       configured engine.
-- [ ] 5.12 Mark any test that needs real model artifacts so it skips cleanly when they are
+- [ ] 5.14 Mark any test that needs real model artifacts so it skips cleanly when they are
       absent; the default `pytest` run must not require them.
 
 ## 6. Docs and spec bookkeeping

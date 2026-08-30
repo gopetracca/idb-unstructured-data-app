@@ -28,11 +28,12 @@ and the operational constraints this specific deployment imposes.
 
 ### Downstream compatibility — the deciding question
 
-Everything after extraction reads `text.json`. Concretely:
+Everything after extraction reads the stage's text output, located through the document's
+`text_blob_ref`. Concretely:
 
 - `chunk_document` reads exactly one key: `extracted_text`. Nothing else in the pipeline
   reads extraction output today.
-- Since `preserve-full-extraction-output` merged, `text.json` also carries pages, tables,
+- Since `preserve-full-extraction-output` merged, that output also carries pages, tables,
   figures, paragraphs with roles, sections, `TextSpan`s, and `BoundingRegion`s. This is
   shipped code, so the target below is a real model rather than a planned one.
 
@@ -279,16 +280,22 @@ queue's `batchSize: 4`. §0 has to measure per-worker RSS, not just per-page CPU
 assumption, not a verified fact, and §0 checks it before anything else in the design is
 worth building.
 
+**A terminated run publishes nothing.** The kill lands during conversion, before any blob
+is written, so a killed worker leaves no orphaned output and no partial publish — the
+document still resolves to the last completed run. The hard deadline's margin has to cover
+what follows conversion, though: two blob writes, the reference publish, and the sweep.
+
 **Partial results are discarded.** A conversion cut off by either timeout has produced
-some pages. Storing them would put a silently truncated `text.json` into the pipeline and
-index a document on incomplete text, with nothing downstream able to tell. The stage fails
-instead.
+some pages. Publishing them would point `text_blob_ref` at a silently truncated output and
+index the document on incomplete text, with nothing downstream able to tell. The stage
+fails and publishes nothing instead, so the last complete run stays current.
 
 ## Decision: the raw payload needs no new plumbing
 
 `preserve-full-extraction-output` carries the verbatim response on
 `MarkdownOutput.raw_analysis: dict[str, Any] | None`, marked `exclude=True` so it never
-serialises into `text.json`, with the use case persisting it to `analysis.json`. The
+serialises into the text output, with the use case persisting it to that run's analysis
+sidecar. The
 comment on the field says the reason: keeping it there rather than in the port signature
 means nothing outside infrastructure has to name an Azure SDK type.
 
@@ -309,17 +316,37 @@ Two more fields are engine-coupled in the same quiet way. `extraction_method` de
 Left alone, a Docling extraction would be stamped with both — which is precisely the
 mixed-corpus ambiguity this change is supposed to remove.
 
-## Decision: `analysis.json` is engine-tagged, never engine-guessed
+## Decision: inherit the publication protocol, tag the payload
 
-`preserve-full-extraction-output` stores the raw analysis at
-`{tenant_id}/{file_id}/analysis.json`. Docling writes the serialised `DoclingDocument`
-there. Two different schemas at one path is acceptable only if the artifact is
-self-describing, so `extraction_metadata.analysis_format` and `extraction_method` are
-written in `text.json`, and a reader keys off them.
+`preserve-full-extraction-output` did not settle on fixed paths. Each run generates a
+`run_id` and writes `{tenant_id}/{file_id}/analysis/{run_id}.json` and
+`{tenant_id}/{file_id}/text/{run_id}.json`, publishes both references in a single
+`update_blob_references`, and sweeps what that update *reports* it displaced rather than
+what the run observed before starting. The code comments give the reasons, and they are
+worth restating because they constrain this change:
+
+- Run scoping means nothing published is overwritten, so until the publish lands the
+  document still reads exactly as the last completed run left it.
+- One update for both references means the row never holds a text output from one run
+  beside a raw analysis from another, including when two extractions overlap.
+- Sweeping from the update's return rather than from a pre-run read means two overlapping
+  runs do not delete the same pair twice and leave the earlier publisher's outputs
+  unreachable.
+
+None of that is Azure-specific — it is a property of the stage. So this change inherits it
+unchanged: Docling supplies a payload, and where it goes and how it is published is
+already decided. A fixed `analysis.json` would reintroduce exactly the overwrite race the
+dependency removed.
+
+What is left for this change is the payload's *identity*. Two engines can now write the
+sidecar, so the artifact must be self-describing:
+`extraction_metadata.analysis_format` and `extraction_method` are written in the text
+output, and a reader keys off them.
 
 Rejected — **separate paths per engine** (`analysis.docling.json`). Path-by-convention is
-against the project's rule that blob references in SQL are the source of truth, and it
-would force every reader to probe two paths to find one artifact.
+against the project's rule that blob references in SQL are the source of truth, doubly so
+now that paths are run-scoped, and it would force every reader to probe two paths to find
+one artifact.
 
 Rejected — **normalise Docling into Azure's `AnalyzeResult` shape.** Fabricating a foreign
 schema loses exactly what a verbatim copy exists to preserve, and reintroduces the lossy
