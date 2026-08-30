@@ -95,6 +95,23 @@ Document Intelligence marks header cells individually and they are conventionall
 necessarily, the leading rows; a table with `columnHeader` cells only in row 3 yields
 `header_rows == [3]`. The adapter reports what it finds rather than assuming row 0.
 
+**`header_rows` and what the prefix repeats are not the same set.** `render_prefix` carries
+the opening markup plus the *leading contiguous run* of header rows — rows 0..k where every
+one of them is a header row — which may be empty. A header row outside that run stays an
+ordinary body row: it is reported in `header_rows`, because that is what the provider found,
+and it is not repeated into every piece.
+
+The two must be distinguished or the model contradicts itself. Take `header_rows == [3]`. If
+the prefix carried row 3, then the prefix followed by the body rows would render 3, 0, 1, 2,
+4… — a different document from the one the extractor produced, and a direct violation of the
+exactness rule two decisions above. Restricting the prefix to the leading run keeps
+concatenation order-preserving, so exactness holds by construction rather than by luck.
+
+It also keeps repetition honest. Repeating a mid-table header into a piece that holds rows
+10–20 asserts that those rows sit under that header, which for a row-3 header of an
+irregular table is a guess. Repeating the leading run asserts only what the rendering
+already shows.
+
 ## Decision: units are recorded, never normalised
 
 Document Intelligence reports inches; Docling reports points. Converting in the adapter

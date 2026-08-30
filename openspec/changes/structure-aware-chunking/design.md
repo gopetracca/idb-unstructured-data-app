@@ -32,8 +32,11 @@ When a table exceeds the chunk size:
    the min-to-max span over row 0's cells is `Budget Summary`, where the row's rendering is
    `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`.
 2. Compose each piece as `render_prefix + its rows + render_suffix`. Because the prefix
-   carries the header rows, every piece — including the first — is a valid table with its
-   header, by concatenation alone.
+   carries the table's leading header rows, every piece — including the first — is a valid
+   table with its header, by concatenation alone. A table whose header is not its leading
+   rows has an empty header in the prefix and its pieces carry none, which is the honest
+   outcome: repeating a mid-table header would assert a relationship the rendering does not
+   show.
 3. Never cut between a row and one marked as continuing from it, so a cell spanning several
    rows stays with the rows it covers.
 4. Record the row range each piece covers.

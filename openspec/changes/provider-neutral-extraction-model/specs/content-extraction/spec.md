@@ -70,15 +70,34 @@ are the same regardless of which service produced them.
 #### Scenario: Part of a table can be rendered without knowing the markup
 
 - **WHEN** a consumer needs to emit only some rows of a table
-- **THEN** the table provides an opening rendering that includes its header rows, a closing
-  rendering, and each body row's own rendering, such that concatenating the opening, any
-  selection of body rows, and the closing yields a valid table in the extractor's form
+- **THEN** the table provides an opening rendering that includes its leading header rows, a
+  closing rendering, and each body row's own rendering, such that concatenating the opening,
+  any selection of body rows, and the closing yields a valid table in the extractor's form
+
+#### Scenario: Only leading header rows are carried in the opening rendering
+
+- **WHEN** a table's header rows are the first rows of the table
+- **THEN** the opening rendering carries them, and the body rows are the remainder in order
+
+#### Scenario: A header row that is not a leading row
+
+- **WHEN** a table reports a header row that does not belong to the leading run of header
+  rows
+- **THEN** it is still reported as a header row, and it remains an ordinary body row in
+  document order rather than being moved into the opening rendering
+
+#### Scenario: A table whose first row is not a header
+
+- **WHEN** no leading row of a table is a header row
+- **THEN** the opening rendering carries only the table's opening markup, and every row is a
+  body row
 
 #### Scenario: The parts reconstruct the whole exactly
 
 - **WHEN** a table's rendering is contiguous in `extracted_text`
-- **THEN** concatenating its opening rendering, all of its body rows in order, and its
-  closing rendering equals its full rendering exactly
+- **THEN** concatenating its opening rendering, all of its body rows in document order, and
+  its closing rendering equals its full rendering exactly — which holds for every table,
+  including one whose header rows are not its leading rows
 
 #### Scenario: Rows carry their own source range
 
