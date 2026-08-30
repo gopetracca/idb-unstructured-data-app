@@ -135,6 +135,32 @@ def _overlaps(extent: tuple[int, int], ranges: list[tuple[int, int]]) -> bool:
     return any(extent[0] < end and start < extent[1] for start, end in ranges)
 
 
+def _without_overlaps(blocks: list[ContentBlock]) -> list[ContentBlock]:
+    """Keep the blocks, in order, that claim characters no earlier block claimed.
+
+    The checks above already drop the elements the service nests inside others — cell
+    paragraphs, a caption inside a figure. This is the unconditional guarantee behind them:
+    "the blocks in reading order" has to describe one document, and a consumer that walks
+    them must never see the same characters twice. Anything still overlapping here is a
+    shape the service produced that we did not anticipate, and dropping it is safer than
+    publishing a block list that contradicts itself.
+    """
+    kept: list[ContentBlock] = []
+    claimed_to = 0
+    for block in blocks:
+        if block.start < claimed_to:
+            logger.debug(
+                "Dropping %s block at %d..%d: it overlaps an element already emitted",
+                block.kind,
+                block.start,
+                block.end,
+            )
+            continue
+        kept.append(block)
+        claimed_to = block.end
+    return kept
+
+
 def _first_page(regions) -> int | None:
     """The page an element starts on, when the service reported one."""
     for region in regions or []:
@@ -625,8 +651,10 @@ class AzureDocumentIntelligenceAdapter(DocumentExtractorPort):
                 )
             )
 
-        blocks.sort(key=lambda block: (block.start, block.end))
-        return blocks
+        # Longest first at a shared start, so that an enclosing element outranks what it
+        # encloses in the sweep below.
+        blocks.sort(key=lambda block: (block.start, -(block.end - block.start)))
+        return _without_overlaps(blocks)
 
     @staticmethod
     def _map_figure(figure) -> ExtractedFigure:

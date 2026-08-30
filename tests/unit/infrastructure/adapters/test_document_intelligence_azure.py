@@ -710,6 +710,31 @@ class TestCanonicalBlocks:
         assert [block.kind for block in output.blocks] == [BlockKind.TABLE]
         assert_blocks_are_ordered_and_disjoint(output)
 
+    async def test_overlapping_paragraphs_cannot_reach_the_block_list(
+        self, mock_document_intelligence_settings
+    ):
+        """The invariant holds for shapes the service is not expected to produce.
+
+        Downstream code relies on walking the blocks and seeing each character once. A
+        response that overlaps its own paragraphs must not turn that into a silent
+        duplication.
+        """
+        markdown = "Alpha beta gamma"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [{"pageNumber": 1}],
+                "paragraphs": [
+                    {"content": "Alpha beta", "spans": [{"offset": 0, "length": 10}]},
+                    {"content": "beta gamma", "spans": [{"offset": 6, "length": 10}]},
+                ],
+            },
+        )
+
+        assert_blocks_are_ordered_and_disjoint(output)
+        assert [block.text_in(output.extracted_text) for block in output.blocks] == ["Alpha beta"]
+
     async def test_output_written_before_blocks_existed_has_none(
         self, mock_document_intelligence_settings
     ):
