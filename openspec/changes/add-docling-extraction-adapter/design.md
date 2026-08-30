@@ -32,8 +32,9 @@ Everything after extraction reads `text.json`. Concretely:
 
 - `chunk_document` reads exactly one key: `extracted_text`. Nothing else in the pipeline
   reads extraction output today.
-- Once `preserve-full-extraction-output` lands, `text.json` also carries pages, tables,
-  figures, paragraphs with roles, sections, spans, and bounding regions.
+- Since `preserve-full-extraction-output` merged, `text.json` also carries pages, tables,
+  figures, paragraphs with roles, sections, `TextSpan`s, and `BoundingRegion`s. This is
+  shipped code, so the target below is a real model rather than a planned one.
 
 So compatibility reduces to: **can Docling fill the enriched `MarkdownOutput` without
 faking anything?** Field by field:
@@ -45,7 +46,7 @@ faking anything?** Field by field:
 | `pages[].text` | items grouped by `prov[0].page_no` | Better than today's Azure mapping, which joins words with spaces and destroys line breaks |
 | `pages[].word_count` | derived | Direct |
 | `pages[]` geometry (width/height/unit) | `PageItem.size` | Direct; `unit` differs (Docling uses points) |
-| `tables` | `TableItem.data` grid: `TableCell` with `start/end_row_offset_idx`, `start/end_col_offset_idx`, and `column_header` / `row_header` / `row_section` flags | Direct, and structurally equivalent to Azure's row/column index + span + `kind` |
+| `tables` | `TableItem.data.grid`: `TableCell` with `start/end_row_offset_idx`, `start/end_col_offset_idx`, and `column_header` / `row_header` / `row_section` flags | Direct. Offsets convert to the domain's `row_index` / `column_index` / `row_span` / `column_span`, and the header flags to `kind` |
 | `figures` | `PictureItem` with `prov` | Direct |
 | `paragraphs[].role` | `DocItemLabel` (`section_header`, `caption`, `footnote`, `page_header`, `page_footer`, …) | Different vocabulary, same concept — needs an explicit mapping table, not a coincidental one |
 | `sections` | group hierarchy / heading levels | Derivable |
@@ -69,6 +70,12 @@ Docling exposes a document-level confidence grade rather than per-word scores. M
 grade onto the same 0–1 float would make two incomparable numbers look comparable. The
 adapter reports Docling's own confidence where available and `analysis_format` says which
 engine produced it, so nobody compares the two by accident.
+
+The claim that the mapping is sound is checkable rather than asserted:
+`tests/support/table_reconstruction.assert_cells_tile_grid` takes an `ExtractedTable` and
+requires its cells to tile `row_count × column_count` exactly once, merged spans included.
+It names no Azure type, so it applies unchanged to a Docling-produced table. A mapping that
+drops a cell or mis-computes a span fails it.
 
 **Conclusion:** the contract holds. The two fields that cannot be filled are declared
 empty rather than approximated, and `extraction_method` plus `analysis_format` on every
@@ -276,6 +283,31 @@ worth building.
 some pages. Storing them would put a silently truncated `text.json` into the pipeline and
 index a document on incomplete text, with nothing downstream able to tell. The stage fails
 instead.
+
+## Decision: the raw payload needs no new plumbing
+
+`preserve-full-extraction-output` carries the verbatim response on
+`MarkdownOutput.raw_analysis: dict[str, Any] | None`, marked `exclude=True` so it never
+serialises into `text.json`, with the use case persisting it to `analysis.json`. The
+comment on the field says the reason: keeping it there rather than in the port signature
+means nothing outside infrastructure has to name an Azure SDK type.
+
+That reasoning generalises for free. The field is typed as a plain dict, not as anything
+Azure-shaped, so the Docling adapter sets it with `DoclingDocument.export_to_dict()` and
+the existing persistence path works unchanged. No port widening, no use-case change — the
+earlier draft of this proposal assumed both would be needed.
+
+What does need attention is the *setting* that gates it. `_store_raw_analysis` reads
+`get_settings().document_intelligence.persist_raw_result`, so with Docling configured, an
+engine-neutral behaviour is controlled by a setting whose name says Document Intelligence.
+The behaviour is correct; the name lies. An engine-neutral name should be introduced with
+the existing one still honoured, since it is presumably already set in deployed
+configuration.
+
+Two more fields are engine-coupled in the same quiet way. `extraction_method` defaults to
+`azure-document-intelligence` and `api_version` to a Document Intelligence version string.
+Left alone, a Docling extraction would be stamped with both — which is precisely the
+mixed-corpus ambiguity this change is supposed to remove.
 
 ## Decision: `analysis.json` is engine-tagged, never engine-guessed
 

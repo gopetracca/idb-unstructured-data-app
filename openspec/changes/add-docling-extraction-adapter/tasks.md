@@ -1,8 +1,8 @@
 # Tasks
 
 Sequencing note: §0 is a spike whose result decides whether §2 onward is worth doing.
-Land `preserve-full-extraction-output` first — it defines the enriched `MarkdownOutput`,
-`analysis.json`, and `analysis_blob_ref` that §3 has to fill.
+`preserve-full-extraction-output` is merged (PR #4), so the `MarkdownOutput`,
+`analysis.json`, and `analysis_blob_ref` that §3 fills already exist in code.
 
 ## 0. Measure before committing
 
@@ -13,9 +13,11 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
 - [ ] 0.1 Assemble a fixture corpus under `tests/fixtures/extraction/` from representative
       IADB documents: a text-heavy publication PDF, a table-heavy operational PDF, a
       scanned/OCR PDF, a DOCX, and one document over 100 pages. Record page counts.
-- [ ] 0.2 Write `scripts/compare_extraction_adapters.py`: run both engines over the corpus
-      and report, per document — wall-clock, peak RSS, page count, table count, character
+- [ ] 0.2 Write `scripts/compare_extraction_adapters.py`, following the conventions of the
+      existing `scripts/show_extraction_output.py`: run both engines over the corpus and
+      report, per document — wall-clock, peak RSS, page count, table count, character
       count, and a markdown similarity score between the two `extracted_text` outputs.
+      Reuse `tests/support/sample_documents.build_sample_pdf` for the bundled default.
 - [ ] 0.3 Run the harness and record CPU seconds per page and peak RSS **per worker
       process**, including the model-resident baseline. Concurrency is capped by memory, so
       the per-worker figure — not the per-page one — sets `max_concurrent_conversions` and
@@ -108,9 +110,11 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       convention and record the unit. Do not copy coordinates across origins.
 - [ ] 3.12 Leave `spans`, `styles`, and `key_value_pairs` empty; do not synthesise markdown
       character offsets. Add a code comment stating why, so it is not "fixed" later.
-- [ ] 3.13 Set `extraction_method` to `docling` and, when raw persistence is on, return the
-      serialised `DoclingDocument` as the raw payload with
-      `analysis_format=docling-document`.
+- [ ] 3.13 Set `extraction_method` to `docling`, `api_version` to the Docling version, and
+      `analysis_format` to `docling-document`. Set `MarkdownOutput.raw_analysis` to
+      `DoclingDocument.export_to_dict()` — the field is a plain dict excluded from
+      serialisation, so the existing `_store_raw_analysis` path persists it with no change
+      to the port or the use case.
 - [ ] 3.14 Map Docling's document-level confidence to `extraction_confidence` where
       available and leave it unset otherwise. Do not derive a per-word-equivalent number.
 
@@ -120,14 +124,21 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       Document Intelligence output.
 - [ ] 4.2 Set `extraction_method` from the adapter that ran rather than from the field's
       default; the Azure adapter keeps its current value.
-- [ ] 4.3 In `process_document.py`, write whichever raw payload the adapter returned to
-      `analysis.json` and record `analysis_blob_ref`, unchanged apart from being
-      engine-agnostic.
+- [ ] 4.3 Stop defaulting `api_version` to a Document Intelligence version string; each
+      adapter sets the version of the engine that ran.
+- [ ] 4.4 Introduce an engine-neutral setting for raw-analysis persistence and have
+      `_store_raw_analysis` read it instead of
+      `get_settings().document_intelligence.persist_raw_result`. Keep
+      `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` honoured, since it is presumably already
+      set in deployed configuration, and document which wins if both are set.
+- [ ] 4.5 Confirm `process_document.py` needs no other change: `raw_analysis` is already
+      engine-neutral, so `analysis.json` and `analysis_blob_ref` work as-is.
 
 ## 5. Tests
 
 - [ ] 5.1 `tests/unit/config/test_settings.py` — `EXTRACTION_ADAPTER` default, valid
-      values, and startup failure on an unrecognised value.
+      values, startup failure on an unrecognised value, and that the legacy
+      `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` still governs raw persistence.
 - [ ] 5.2 `tests/unit/test_container.py` — selection matrix: default, `docling`, explicit
       fake wins, Azure-unconfigured falls back to the fake and not to Docling, `docling`
       without the package raises the stated error.
@@ -135,8 +146,10 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       `DoclingDocument`: tables with a header row and a merged cell survive with correct
       row/column offsets; figures, paragraph roles, page geometry, and bounding regions
       survive; `spans` and `styles` are empty; coordinate origin is converted.
-- [ ] 5.4 Table reconstruction test mirroring the Azure one: rebuild the grid from stored
-      cells alone and assert it tiles `row_count × column_count` without overlap.
+- [ ] 5.4 Table reconstruction: call the existing
+      `tests/support/table_reconstruction.assert_cells_tile_grid` on a Docling-produced
+      `ExtractedTable`. It takes the domain type and names no Azure type, so both engines
+      are held to one bar — do not write a second copy of the assertion.
 - [ ] 5.5 `tests/unit/infrastructure/docling/test_adapter.py` — artifacts missing raises at
       construction naming `DOCLING_ARTIFACTS_PATH`; over-limit page count and file size
       fail before conversion starts; a partial-success result fails the stage rather than
@@ -151,9 +164,11 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       timeout, so the arithmetic cannot silently drift if `host.json` changes.
 - [ ] 5.8 Assert a worker killed mid-conversion, or dying of memory exhaustion, leaves the
       parent able to serve health probes and process the next message.
-- [ ] 5.9 Cross-engine contract test: the same fixture through both adapters produces
-      `MarkdownOutput` objects that validate against the same model and agree on page
-      count and table count within a stated tolerance.
+- [ ] 5.9 Cross-engine contract test over `tests/support/sample_documents.build_sample_pdf`
+      — the document that already exercises a merged-header table: both adapters produce
+      `MarkdownOutput` objects that validate against the same model, both pass
+      `assert_cells_tile_grid`, and they agree on page and table count within a stated
+      tolerance.
 - [ ] 5.10 Chunking regression: `chunk_document` over a Docling-produced `text.json`
       chunks successfully with no engine-specific handling.
 - [ ] 5.11 `tests/unit/presentation/` — capabilities and supported-formats reflect the

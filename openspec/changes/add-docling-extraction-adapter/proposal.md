@@ -39,13 +39,19 @@ evidence behind it.
 - **New `DoclingExtractionAdapter`** under `src/infrastructure/docling/`, implementing
   `DocumentIntelligencePort` and producing the same `MarkdownOutput` contract — including
   the structured tables, figures, paragraphs, sections, spans, and per-page geometry that
-  `preserve-full-extraction-output` adds. Docling's `DoclingDocument` carries all of these
+  `preserve-full-extraction-output` added. Docling's `DoclingDocument` carries all of these
   natively; the mapping is a projection, not a reconstruction.
 - **Raw-artifact parity.** When raw persistence is on, the adapter writes the serialised
   `DoclingDocument` to `{tenant_id}/{file_id}/analysis.json`. The two adapters produce
   different raw shapes, so `extraction_metadata` gains `analysis_format`
   (`azure-document-intelligence-analyze-result` or `docling-document`) — a reader must
   never have to guess which schema it is holding.
+- **Raw-persistence configuration made engine-neutral.** Whether the verbatim analysis is
+  stored is a property of the extraction stage, not of Azure, but it is currently spelled
+  `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` and read straight off the Document
+  Intelligence settings object. With Docling selected that reads as if it should not
+  apply, while in fact it still governs. Introduce an engine-neutral name and keep the
+  existing one honoured so deployed configuration does not break.
 - **`extraction_method` becomes meaningful.** It already exists and is hard-coded to
   `azure-document-intelligence`; the Docling adapter sets `docling`, so a stored
   `text.json` records which engine produced it. This is the migration story: mixed corpora
@@ -85,17 +91,32 @@ chunking, vectorization, or search behaviour; GPU inference; Docling's VLM pipel
 
 - **Affected specs:** `content-extraction` (modified), `adapter-selection` (modified),
   `deployment-and-runtime` (modified)
-- **Depends on:** `preserve-full-extraction-output`. That change defines the enriched
-  `MarkdownOutput`, `analysis.json`, and `analysis_blob_ref` this one has to fill. Landing
-  Docling first would mean writing the mapping twice.
+- **Builds on:** `preserve-full-extraction-output`, now merged (PR #4). It shipped as
+  working code, so the contract this change fills is real rather than planned: the enriched
+  `MarkdownOutput` with `tables`, `figures`, `paragraphs`, `sections`, `styles`,
+  `key_value_pairs`, `content_format`, and `model_id`; `TextSpan` and `BoundingRegion`;
+  `analysis.json` and the `analysis_blob_ref` column. Two details of how it landed shape
+  this change and are worth stating, because they differ from how that proposal described
+  the work:
+  - **The port was not widened.** The verbatim payload rides on
+    `MarkdownOutput.raw_analysis: dict[str, Any] | None`, declared `exclude=True` so it
+    never reaches `text.json`. That is already engine-neutral — the Docling adapter sets
+    the field with `DoclingDocument.export_to_dict()` and the use case persists it
+    unchanged. No port or use-case signature has to move.
+  - **`tests/support/table_reconstruction.assert_cells_tile_grid` takes the domain
+    `ExtractedTable`,** not an Azure type, so a Docling-produced table can be held to
+    exactly the same reconstruction bar. The cross-engine contract test is close to free.
 - **Affected code:**
   - `src/config/settings.py` — `EXTRACTION_ADAPTER`, new `DoclingSettings`
   - `src/container.py` — `_create_document_intelligence_adapter` gains the branch
   - `src/infrastructure/docling/adapter.py`, `mapper.py` — new
-  - `src/core/entities/document_analysis.py` — `analysis_format`, `extraction_method`
-    no longer defaulted to the Azure value at every call site
-  - `src/application/use_cases/process_document.py` — write whichever raw payload the
-    adapter returned
+  - `src/core/entities/document_analysis.py` — add `analysis_format`; stop defaulting
+    `extraction_method` to `azure-document-intelligence` and `api_version` to a Document
+    Intelligence version string, since both are now engine-dependent
+  - `src/application/use_cases/process_document.py` — `_store_raw_analysis` reads
+    `get_settings().document_intelligence.persist_raw_result` directly, so an
+    engine-neutral behaviour is gated by a Document-Intelligence-prefixed setting; make
+    that selection engine-neutral
   - `Dockerfile` — prefetch and verify model artifacts, `DOCLING_ARTIFACTS_PATH`
   - `.github/workflows/container-build-acr.yml` — build-args plumbing, which it lacks
     entirely today, plus the delivery workflows that call it
