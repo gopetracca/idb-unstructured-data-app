@@ -1,0 +1,204 @@
+# document-chunking Delta
+
+## ADDED Requirements
+
+### Requirement: Tables Are Chunked As Structure, Not As Text
+
+The chunking stage SHALL take table boundaries from the extraction output's block list,
+and SHALL NOT recover them by matching patterns in the rendered text.
+
+#### Scenario: Table boundaries come from the extraction output
+
+- **WHEN** a document whose extraction output carries a block list is chunked
+- **THEN** each table's extent is taken from its block, and no chunk boundary falls inside a
+  table
+
+#### Scenario: The rules do not depend on the rendering
+
+- **WHEN** one document's tables were rendered as HTML and another's as pipe tables
+- **THEN** the same rules apply to both — no cut inside a row, no cut inside a group of rows
+  joined by a merged cell, every piece composed as a fragment, and the same metadata
+  recorded — and no rule refers to the syntax of either rendering
+
+#### Scenario: Where the boundaries fall does depend on the rendering
+
+- **WHEN** the same table is rendered in two forms whose text lengths differ
+- **THEN** the number of pieces and the rows in each may differ, because the chunk size is a
+  budget on the composed text and one rendering consumes more of it per row than the other
+
+#### Scenario: Chunk text is the extractor's rendering
+
+- **WHEN** a chunk contains a table or part of one
+- **THEN** its text is the rendering the extractor produced for that table, not a
+  re-serialisation by the chunker
+
+#### Scenario: Every chunker behaves the same
+
+- **WHEN** the configured chunker is changed
+- **THEN** table handling is unaffected, because it is performed by the chunking stage
+  rather than by the chunker
+
+### Requirement: Oversized Tables Are Split On Row Boundaries With Their Header
+
+The chunking stage SHALL split a table that exceeds the configured chunk size, cutting only
+between rows, so that every piece is a fragment of that table as the extraction contract
+defines one.
+
+#### Scenario: A table larger than the chunk size
+
+- **WHEN** a table's rendering exceeds the strategy's chunk size
+- **THEN** it is emitted as several chunks, each cut at a row boundary and each composed as a
+  fragment, so each carries whatever the rendering places before the first body row
+
+#### Scenario: A table within the chunk size
+
+- **WHEN** a table fits within the chunk size
+- **THEN** it is emitted as a single chunk holding every body row, which is its full
+  rendering
+
+#### Scenario: Every piece is independently interpretable
+
+- **WHEN** a chunk holds rows from the middle of a table
+- **THEN** it begins with the table's prefix, so where the rendering carries column labels
+  there, the columns its values belong to can be determined from the chunk alone
+
+#### Scenario: Pieces are composed, not sliced
+
+- **WHEN** a piece of a table is emitted
+- **THEN** its text is the fragment the extraction contract defines for the rows it holds,
+  and the stage does not cut the extracted text at positions derived from cell spans
+
+#### Scenario: Rows joined by a merged cell stay together
+
+- **WHEN** a table contains a cell spanning several rows
+- **THEN** no cut falls between those rows, so no piece is missing content rendered only in
+  the first of them
+
+#### Scenario: A single row larger than the chunk size
+
+- **WHEN** one row's rendering alone exceeds the chunk size
+- **THEN** that row is emitted whole in an oversized chunk rather than cut, and the
+  condition is logged
+
+#### Scenario: A table with no header cells
+
+- **WHEN** a table that declares no header rows is split
+- **THEN** every piece is still composed as a fragment, so it carries whatever the
+  extractor's rendering places before the first body row, and splitting still occurs on row
+  boundaries
+
+#### Scenario: A split table is one table, not a table and copies of it
+
+- **WHEN** a table is split into several chunks
+- **THEN** no further chunk containing the whole table is emitted, and each of the table's
+  body rows appears in exactly one piece, so the pieces cover the table once rather than
+  duplicating it
+
+#### Scenario: The repeated frame is not a duplicated row
+
+- **WHEN** the extractor's opening rendering carries a header row or a delimiter, and a
+  table is split
+- **THEN** that opening appears in every piece, and this does not count as duplicating a body
+  row
+
+#### Scenario: Pieces are attributable to one table
+
+- **WHEN** a consumer reads several chunks produced from one split table
+- **THEN** every piece carries the same table identifier and its own row range, so they can
+  be recognised as one table and ordered without comparing their text
+
+### Requirement: Table Chunk Metadata
+
+A chunk containing a table or part of one SHALL record enough for a consumer to tell what
+it holds.
+
+#### Scenario: Whole table
+
+- **WHEN** a chunk holds an entire table
+- **THEN** it records that it contains a table, the table's identifier, and its page number
+
+#### Scenario: Partial table
+
+- **WHEN** a chunk holds part of a split table
+- **THEN** it additionally records the range of table rows it covers, so a partial table is
+  distinguishable from a whole one
+
+### Requirement: Chunk Offsets Record Provenance
+
+A chunk's character offsets SHALL identify where its own content came from in the extracted
+text, and SHALL NOT be relied upon as an instruction for slicing that text.
+
+#### Scenario: A chunk whose text is a verbatim slice
+
+- **WHEN** a chunk carries no content prepended from elsewhere
+- **THEN** its offsets delimit exactly the text it holds, as before
+
+#### Scenario: A table piece carrying a repeated prefix
+
+- **WHEN** a piece of a split table is emitted
+- **THEN** its offsets delimit the rows the piece itself covers, and the piece additionally
+  records the source range of the prefix it carries and that it carries one — whether that
+  prefix is markup alone, header rows, or a row the rendering requires but the provider did
+  not mark as a header
+
+#### Scenario: Length is recorded, not recomputed
+
+- **WHEN** a chunk is created
+- **THEN** the length of its composed text is recorded on the chunk index, so a consumer
+  listing chunks reports it without reading the chunk's content and without subtracting its
+  offsets, which excludes any prepended content
+
+#### Scenario: Listing chunks does not read their content
+
+- **WHEN** chunks are listed
+- **THEN** the response is served from indexed records alone, as before, and reports each
+  chunk's recorded length
+
+## MODIFIED Requirements
+
+### Requirement: Chunk A Document
+
+The system SHALL chunk a document's extracted text using the requested strategy, respecting
+the structural boundaries the extraction output declares, store each chunk in the chunks
+container, and record a chunk index row per chunk.
+
+#### Scenario: Successful chunking
+
+- **WHEN** `POST /api/v1/chunks` is called with `documents.write` for a document whose extracted text exists
+- **THEN** the text is chunked, each chunk is written to `{tenant_id}/{file_id}/chunks/{chunk_id}.json`, a chunk index row is created per chunk, and the response is `202` carrying `file_id`, `status`, `chunk_count`, `chunks_url`, the strategy used, `correlation_id`, and `processing_time_ms`
+
+#### Scenario: Extraction output without a block list
+
+- **WHEN** the document's extraction output predates the canonical block list
+- **THEN** table boundaries are recovered from the rendered HTML as before, and chunking
+  succeeds with the same guarantees for HTML-rendered tables
+
+#### Scenario: Text located via the recorded reference
+
+- **WHEN** the source text is loaded
+- **THEN** the document's `text_blob_ref` column is used as the source of truth for its location
+
+#### Scenario: Missing text reference
+
+- **WHEN** the document has no `text_blob_ref`
+- **THEN** a chunking error with reason `missing_text_blob_ref` is raised
+
+#### Scenario: Text blob absent
+
+- **WHEN** the recorded text blob does not exist in the source container
+- **THEN** a text-not-found error is raised and the response is `404`
+
+#### Scenario: Empty extracted text
+
+- **WHEN** the text JSON contains no `extracted_text` content
+- **THEN** a chunking error is raised rather than producing zero chunks silently
+
+#### Scenario: Unknown document
+
+- **WHEN** the `file_id` has no record for the tenant
+- **THEN** the response is `404` with error `DocumentNotFound`
+
+#### Scenario: Chunk count recorded
+
+- **WHEN** chunking completes
+- **THEN** the document's pipeline state is updated with the resulting chunk count
