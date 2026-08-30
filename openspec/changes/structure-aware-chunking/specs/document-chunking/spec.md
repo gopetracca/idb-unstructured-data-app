@@ -64,6 +64,18 @@ between rows and repeating the table's header rows in every piece.
 - **WHEN** a table that declares no header rows is split
 - **THEN** the pieces carry no header prefix and splitting still occurs on row boundaries
 
+#### Scenario: A split table is one table, not a table and copies of it
+
+- **WHEN** a table is split into several chunks
+- **THEN** no further chunk containing the whole table is emitted, and each row of the table
+  appears in exactly one piece, so the pieces cover the table once rather than duplicating it
+
+#### Scenario: Pieces are attributable to one table
+
+- **WHEN** a consumer reads several chunks produced from one split table
+- **THEN** every piece carries the same table identifier and its own row range, so they can
+  be recognised as one table and ordered without comparing their text
+
 ### Requirement: Table Chunk Metadata
 
 A chunk containing a table or part of one SHALL record enough for a consumer to tell what

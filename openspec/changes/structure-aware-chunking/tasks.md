@@ -46,6 +46,8 @@
 - [ ] 5.4 Both chunker adapters produce the same table chunks for the same input.
 - [ ] 5.5 A regression for the defect that motivated this: a table larger than the chunk
       size must not produce a single chunk exceeding it.
+- [ ] 5.6 A split table yields no whole-table chunk, every row appears in exactly one piece,
+      and all pieces share one `table_id` with distinct row ranges.
 
 ## 6. Evidence
 

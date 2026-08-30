@@ -48,6 +48,10 @@ blocks rather than from a regex.
 - **The behaviour belongs to the stage.** Splitting and header propagation move above the
   chunker port, so every strategy and every chunker adapter gets them. Adapters keep doing
   what they are good at: splitting prose.
+- **A split table stays one table.** The pieces cover the table exactly once — no
+  additional whole-table chunk is emitted beside them. Duplicating a table at two
+  granularities doubles its storage and lets the copy compete with its own pieces in
+  results, which is a retrieval problem dressed as a feature.
 - **Chunk metadata gains the table's identity and extent.** `has_table` and `table_id`
   keep their meaning; a split piece additionally records which rows of the table it holds,
   so a consumer can tell a partial table from a whole one.

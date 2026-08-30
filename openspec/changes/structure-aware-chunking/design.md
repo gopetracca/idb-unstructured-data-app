@@ -64,9 +64,32 @@ consequences stated so they are not discovered later:
 - Both paths stay tested until every document has been re-extracted. The fallback's removal
   is a follow-up with a precondition, not a cleanup someone can do opportunistically.
 
-## Open question
+## Decision: a split table is still one table
 
-Whether a table should *also* be emitted as one whole chunk alongside its split pieces,
-giving retrieval both a summary-level and a row-level target. It doubles the storage for
-tables and risks the whole-table chunk crowding out the specific piece in results. Not
-proposed here; worth revisiting once the retrieval measurement above exists.
+A table that is split produces its pieces and nothing else. No additional chunk holding
+the whole table is emitted alongside them, and the pieces are not copies of each other's
+content — each holds a distinct range of rows, and together they cover the table exactly
+once.
+
+The rejected alternative was to emit both: the pieces for row-level retrieval and a
+whole-table chunk for summary-level. It reads well and behaves badly. The whole-table chunk
+duplicates every row already stored in the pieces, so a table costs roughly twice its size
+in storage and in embedding calls. Worse, the duplicate competes with its own pieces at
+query time: a question whose answer is in one row matches both the piece holding that row
+and the whole-table chunk containing it, and the top results fill with two views of the
+same data instead of two different answers. Deduplication after retrieval would then have
+to know that one chunk contains another — reintroducing exactly the structural reasoning
+this design pushes into the extractor.
+
+Two consequences follow, and both are stated as requirements rather than left implicit:
+
+- **Every piece is a complete table in its own right.** With the header rows repeated, a
+  piece is valid in the extractor's rendering and interpretable alone. "One table divided"
+  is not a licence for pieces that only make sense reassembled.
+- **The pieces share the table's identity.** All carry the same `table_id`, distinguished
+  by their row range, so a consumer can tell that several chunks are one table without
+  comparing their text.
+
+Reassembling a split table — for a consumer that wants the whole thing — is therefore
+ordering the pieces by row range and dropping the repeated header from all but the first.
+That is a consumer-side concern and needs nothing this stage does not already record.
