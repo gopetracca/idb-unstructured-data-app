@@ -68,8 +68,15 @@ class PipelineStorePort(Protocol):
         raw_blob_ref: str | None = None,
         text_blob_ref: str | None = None,
         analysis_blob_ref: str | None = None,
+        clear_analysis_blob_ref: bool = False,
     ) -> None:
-        """Update blob storage references for a file (on the files table)."""
+        """Update blob storage references for a file (on the files table).
+
+        A `None` reference means "leave it alone", so re-running a stage cannot wipe a
+        path it did not produce. Clearing is therefore explicit: pass
+        `clear_analysis_blob_ref=True` when a run deliberately produced no raw analysis,
+        so the row cannot keep pointing at an earlier run's sidecar.
+        """
         ...
 
     async def query_by_status(

@@ -172,12 +172,16 @@ class ProcessDocumentUseCase:
                 content_type="application/json; charset=utf-8",
             )
 
-            # Store blob references in SQL (SSOT for content location)
+            # Store blob references in SQL (SSOT for content location). When this run
+            # produced no sidecar, the reference is cleared rather than left alone: a
+            # re-processed document would otherwise keep pointing at the previous run's
+            # analysis.json while its text.json says raw_analysis_stored=false.
             await self._pipeline_store.update_blob_references(
                 tenant_id=request.tenant_id,
                 file_id=request.file_id,
                 text_blob_ref=output_blob_path,
                 analysis_blob_ref=analysis_blob_path,
+                clear_analysis_blob_ref=analysis_blob_path is None,
             )
 
             # Calculate processing time

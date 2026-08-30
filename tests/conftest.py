@@ -321,8 +321,39 @@ def pytest_configure(config):
     )
 
 
+def _docker_is_available() -> bool:
+    """Whether a Docker daemon is reachable for the testcontainers fixtures."""
+    import subprocess
+
+    try:
+        return (
+            subprocess.run(
+                ["docker", "info"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip tests based on environment configuration."""
+    # SQL Server tests run against a testcontainer, so they need a Docker daemon. Without
+    # one the session-scoped fixture raises during setup, which reads as a broken test
+    # rather than an absent dependency.
+    sqlserver_items = [item for item in items if "requires_sqlserver" in item.keywords]
+    if sqlserver_items and (
+        os.getenv("SKIP_SQLSERVER_TESTS") or not _docker_is_available()
+    ):
+        skip_sqlserver = pytest.mark.skip(
+            reason="SQL Server tests need a running Docker daemon (or SKIP_SQLSERVER_TESTS is set)"
+        )
+        for item in sqlserver_items:
+            item.add_marker(skip_sqlserver)
+
     # Skip Azurite tests if requested
     if os.getenv("SKIP_AZURITE_TESTS"):
         skip_azurite = pytest.mark.skip(reason="SKIP_AZURITE_TESTS is set")

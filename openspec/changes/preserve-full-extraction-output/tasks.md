@@ -70,10 +70,12 @@
       `raw_analysis_stored=false`.
 - [x] 4.6 Chunking regression: `chunk_document` still reads `extracted_text` from an
       enriched `text.json` unchanged.
-- [x] 4.7 Migration `011` reviewed against the temporal-table pattern in `004`.
-      **Not executed:** the migration needs a live SQL Server with the system-versioned
-      `files`/`files_history` pair; there is no such instance in this workspace, so upgrade
-      and downgrade are unverified against a real database.
+- [x] 4.7 Migration `011` executed against real SQL Server 2022 (the testcontainers
+      fixture that runs `alembic upgrade head`): upgrade, downgrade to `010`, and
+      re-upgrade all succeed, with `analysis_blob_ref` present as `varchar(1024)` on both
+      `files` and `files_history` and absent from both after downgrade.
+- [x] 4.8 Repository-level tests for the raw-analysis reference against real SQL Server,
+      covering the explicit clear (`tests/integration/infrastructure/test_analysis_blob_ref_sqlserver.py`).
 
 ## 5. Docs and spec bookkeeping
 
@@ -93,7 +95,22 @@
   is available in this workspace, so `tests/integration/infrastructure/test_document_intelligence_live.py`
   has only been shown to skip cleanly. Its offline half — the PDF builder and the
   reconstruction assertions it shares with the unit tests — does run.
-- **Migration 011 is unexecuted.** See task 4.7.
+- **Migration 011 has now been executed** against SQL Server 2022 in a container — see
+  task 4.7. The earlier note that it was unverified no longer applies.
 - Marked the test files this change touches with `@pytest.mark.unit`. CI runs
   `pytest -m unit`, and these files carried no marker, so their tests were being collected
   and then deselected in CI. Selected unit tests went from 224 to 336 as a result.
+
+## Follow-up from review
+
+- **A cleared sidecar must clear its reference.** `update_blob_references` treats `None`
+  as "leave it alone", which is right for stages that only own one path — but it meant a
+  re-processed document kept pointing at the *previous* run's `analysis.json` while the
+  freshly written `text.json` said `raw_analysis_stored: false`. Added an explicit
+  `clear_analysis_blob_ref` flag on the pipeline-store and file-index ports and their SQL
+  Server repositories; `ProcessDocumentUseCase` sets it whenever a run produced no
+  sidecar. Covered at both levels: use-case tests for the disabled / failed / no-payload
+  paths, and SQL Server tests for the column itself.
+- The now-orphaned `analysis.json` blob from the earlier run is left in place. Nothing
+  points at it, and `delete_document` already removes it with the `{tenant}/{file_id}/`
+  prefix, so deleting it here would add a failure mode without removing a stale read path.

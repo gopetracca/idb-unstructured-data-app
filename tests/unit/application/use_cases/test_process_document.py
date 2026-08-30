@@ -433,6 +433,7 @@ class TestRawAnalysisPersistence:
         kwargs = mock_pipeline_store.update_blob_references.call_args.kwargs
         assert kwargs["analysis_blob_ref"] == f"{sample_tenant_id}/{sample_file_id}/analysis.json"
         assert kwargs["text_blob_ref"] == f"{sample_tenant_id}/{sample_file_id}/text.json"
+        assert kwargs["clear_analysis_blob_ref"] is False
 
     async def test_text_json_records_that_the_raw_copy_landed(
         self,
@@ -484,7 +485,10 @@ class TestRawAnalysisPersistence:
         uploads = uploads_by_path(mock_blob_client)
         assert f"{sample_tenant_id}/{sample_file_id}/analysis.json" not in uploads
         assert result.status == ProcessingStatus.COMPLETED
-        assert mock_pipeline_store.update_blob_references.call_args.kwargs["analysis_blob_ref"] is None
+        kwargs = mock_pipeline_store.update_blob_references.call_args.kwargs
+        assert kwargs["analysis_blob_ref"] is None
+        # Not merely "leave it alone": a re-run must not inherit an earlier sidecar.
+        assert kwargs["clear_analysis_blob_ref"] is True
         text_json = json.loads(uploads[f"{sample_tenant_id}/{sample_file_id}/text.json"]["data"])
         assert text_json["extraction_metadata"]["raw_analysis_stored"] is False
         # The structural elements are not gated by the setting.
@@ -514,6 +518,12 @@ class TestRawAnalysisPersistence:
             mock_blob_client
         )
         assert result.status == ProcessingStatus.COMPLETED
+        assert (
+            mock_pipeline_store.update_blob_references.call_args.kwargs[
+                "clear_analysis_blob_ref"
+            ]
+            is True
+        )
 
     async def test_a_failed_sidecar_write_does_not_fail_the_stage(
         self,
@@ -546,7 +556,9 @@ class TestRawAnalysisPersistence:
         result = await use_case.execute(request_)
 
         assert result.status == ProcessingStatus.COMPLETED
-        assert mock_pipeline_store.update_blob_references.call_args.kwargs["analysis_blob_ref"] is None
+        kwargs = mock_pipeline_store.update_blob_references.call_args.kwargs
+        assert kwargs["analysis_blob_ref"] is None
+        assert kwargs["clear_analysis_blob_ref"] is True
         written = [c.kwargs["data"] for c in mock_blob_client.upload_blob.call_args_list
                    if c.kwargs["blob_path"] == text_path]
         assert json.loads(written[0])["extraction_metadata"]["raw_analysis_stored"] is False
