@@ -103,3 +103,29 @@ belongs to is evident from its path.
 
 - **WHEN** an integration test is added
 - **THEN** it lives under the integration tree, separated into HTTP-level and infrastructure-level suites
+
+### Requirement: Developer Token Helpers
+
+The system SHALL provide scripts for minting a bearer token against the real app
+registration, covering both permission models, so a developer can exercise the
+authenticated API without embedding credentials in tooling.
+
+#### Scenario: App-only token
+
+- **WHEN** the client-credentials helper runs with a client secret supplied through the environment
+- **THEN** it returns an app-only token carrying the `roles` claim for whatever App Roles the service principal is assigned
+
+#### Scenario: Delegated token
+
+- **WHEN** a token carrying delegated `scp` scopes is needed
+- **THEN** the interactive authorization-code helper is used, because client credentials can never produce `scp`
+
+#### Scenario: Inspecting claims
+
+- **WHEN** a helper is run in decode mode
+- **THEN** it prints the token's claims instead of the raw token
+
+#### Scenario: Secrets come from the environment
+
+- **WHEN** a helper needs a client secret
+- **THEN** it is read from an environment variable sourced from the key vault, never hard-coded

@@ -135,3 +135,48 @@ before the new application revision rolls out.
 
 - **WHEN** the container image is built
 - **THEN** the migration entrypoint lives under `src/` so it is present in the image, unlike the excluded `scripts/` directory
+
+### Requirement: Connection Pool Behaviour
+
+The system SHALL configure the async database engine so a pooled connection cannot be
+handed out dead and a hung server cannot stall a request indefinitely.
+
+#### Scenario: Liveness check before use
+
+- **WHEN** a connection is taken from the pool
+- **THEN** it is pinged first, so a connection dropped by the server or an idle-timeout is replaced rather than raising on first use
+
+#### Scenario: Connection timeout applied
+
+- **WHEN** the database URL does not already specify a connection timeout
+- **THEN** a 10-second connection timeout is appended, so an unreachable server fails fast instead of hanging
+
+#### Scenario: Pool sizing
+
+- **WHEN** the engine is created
+- **THEN** it uses the configured pool size, overflow, and checkout timeout, defaulting to 5, 10, and 30 seconds
+
+#### Scenario: Objects usable after commit
+
+- **WHEN** a session commits
+- **THEN** loaded objects remain accessible without a refresh, so a use case can read the entity it just persisted
+
+### Requirement: Document Identity Invariants
+
+The system SHALL enforce the document identity record's invariants at the domain
+boundary rather than relying on the database alone.
+
+#### Scenario: Version
+
+- **WHEN** a document record is created or updated
+- **THEN** its version is at least 1, starting at 1 on upload and incrementing on each metadata update
+
+#### Scenario: Size
+
+- **WHEN** a document record is created
+- **THEN** its byte size is non-negative
+
+#### Scenario: External identifier length
+
+- **WHEN** an `ezshare_id` is supplied
+- **THEN** it is at most 100 characters

@@ -99,3 +99,18 @@ batch, carrying the duration and any failure detail.
 
 - **WHEN** a batch spanning several files is ingested
 - **THEN** one `ingest` event is recorded for each distinct `file_id` in the batch
+
+### Requirement: Vector Document Invariants
+
+The system SHALL reject a vector document that cannot be indexed coherently, before it
+reaches the vector database.
+
+#### Scenario: Empty vector
+
+- **WHEN** a vector document is constructed with an empty vector
+- **THEN** construction fails
+
+#### Scenario: Composite identifier
+
+- **WHEN** a vector document identifier is supplied
+- **THEN** it must follow the `{file_id}_{chunk_id}` composite pattern, so a chunk is unique across files within one index

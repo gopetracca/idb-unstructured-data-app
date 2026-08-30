@@ -143,3 +143,23 @@ them as not implemented until they are built.
 
 - **WHEN** `GET /api/v1/embeddings`, `GET /api/v1/embeddings/{id}`, or `DELETE /api/v1/embeddings/{id}` is called
 - **THEN** the response is `501 Not Implemented`
+
+### Requirement: Embedding Record Invariants
+
+The system SHALL enforce the shape of a stored embedding, so ingestion can validate it
+against a collection without re-deriving anything.
+
+#### Scenario: Dimension
+
+- **WHEN** an embedding is created
+- **THEN** it records the model used and a vector dimension of at least 1
+
+#### Scenario: Chunk provenance carried
+
+- **WHEN** an embedding is created
+- **THEN** it carries the file and chunk identifiers, the chunk text, and metadata recording the model version, token count, chunking strategy, chunk size, overlap, page number, section path, and table flags
+
+#### Scenario: Previews
+
+- **WHEN** an embedding is summarised
+- **THEN** the vector preview is its first five components and the text preview the first 100 characters

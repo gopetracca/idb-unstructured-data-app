@@ -162,3 +162,23 @@ as not implemented until they are built.
 
 - **WHEN** `GET /api/v1/chunks/{id}` or `DELETE /api/v1/chunks/{id}` is called
 - **THEN** the response is `501 Not Implemented`
+
+### Requirement: Chunk Record Invariants
+
+The system SHALL enforce the shape of a chunk and the metadata it carries, so downstream
+stages and search results can rely on them.
+
+#### Scenario: Position
+
+- **WHEN** a chunk is produced
+- **THEN** its index within the file is zero-based and non-negative, and its start and end character offsets are non-negative
+
+#### Scenario: Preview
+
+- **WHEN** a chunk preview is stored or returned
+- **THEN** it is the first 100 characters of the chunk text, and empty when the text is empty
+
+#### Scenario: Chunk metadata carried
+
+- **WHEN** a chunk is produced
+- **THEN** its metadata records the overlap, token count, section path, page label, whether it is a table and that table's identifier, and the strategy and chunk size that produced it

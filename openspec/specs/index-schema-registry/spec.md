@@ -40,6 +40,17 @@ no dependency on any search SDK in the core layer.
 The system SHALL compose each document category's index schema from shared common
 fields, shared chunk-level fields, and the category's own fields.
 
+#### Scenario: Common fields
+
+- **WHEN** any category's schema is composed
+- **THEN** it includes the document-level common fields `document_type`, `collection_name`, `ezshare_id`, `country`, `year`, `language`, `disclosed`, `tags`, `blob_name`, `document_name`, `document_author`, `department`, `source`, and `file_extension`
+- **AND** `tags` is a multi-value collection field, and `blob_name` is stored but not filterable
+
+#### Scenario: Chunk fields
+
+- **WHEN** any category's schema is composed
+- **THEN** it includes the chunk-level fields `page_number`, `section_path`, `has_table`, `table_id`, `chunking_strategy`, `token_count`, `chunk_size`, `overlap_chars`, and `model_version`
+
 #### Scenario: Operational schema
 
 - **WHEN** the schema for `operational` is requested

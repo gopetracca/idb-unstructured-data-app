@@ -314,3 +314,23 @@ per-field semantics, combining independent filters with AND.
 
 - **WHEN** every supplied filter was pruned as empty
 - **THEN** no filter expression is sent to the backend
+
+### Requirement: Search Result Invariants
+
+The system SHALL constrain the scores a result may carry and define how results compare,
+so ranking is well-defined across modes.
+
+#### Scenario: Score bounds
+
+- **WHEN** a result is returned
+- **THEN** its relevance score is non-negative, and a reranker score, when present, is between 0 and 4
+
+#### Scenario: Ranking key
+
+- **WHEN** two results are compared
+- **THEN** the reranker score is used when present and the relevance score otherwise
+
+#### Scenario: Result identity
+
+- **WHEN** two results are compared for equality
+- **THEN** they are equal when their chunk and file identifiers match, independent of score

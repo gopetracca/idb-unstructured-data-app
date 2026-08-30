@@ -230,3 +230,23 @@ an implied one.
 
 - **WHEN** the configured queues are provisioned at startup
 - **THEN** `delete-file` is created alongside the rest, but no queue trigger consumes it — deletion is performed synchronously by the delete endpoint, so a message published there would never be processed
+
+### Requirement: Queue Message Transport
+
+The system SHALL encode and bound pipeline messages so producer and consumer agree on
+the wire format and no message lingers indefinitely.
+
+#### Scenario: Encoding
+
+- **WHEN** a message is published or read
+- **THEN** it is base64-encoded text, matching the encoding the Functions host is configured to expect
+
+#### Scenario: Message lifetime
+
+- **WHEN** a message is published without an explicit time to live
+- **THEN** it expires after the client default of seven days
+
+#### Scenario: Delayed visibility
+
+- **WHEN** a publisher supplies a visibility timeout
+- **THEN** the message stays invisible to consumers for that period before becoming available
