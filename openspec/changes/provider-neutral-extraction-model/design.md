@@ -37,11 +37,11 @@ puts the hardest part of the problem in the layer with the least context, repeat
 
 ## Decision: the adapter renders tables; nothing downstream parses
 
-`ExtractedTable.rendered` holds the table's text exactly as it appears in `text`, and
-`header_rendered` holds its header rows in the same form. Today, for Document
-Intelligence, `rendered` is the HTML block that is already in the markdown. For Docling it
+`ExtractedTable.rendered` holds the table's text exactly as it appears in `text`. Today,
+for Document Intelligence, that is the HTML block already in the markdown; for Docling it
 would be the pipe table. A consumer that needs a table's text reads `rendered`; a consumer
-that needs its header reads `header_rendered`; neither ever looks for `<table` or `|---|`.
+that needs part of one composes `render_prefix`, the rows it wants, and `render_suffix`.
+Neither ever looks for `<table` or `|---|`.
 
 This is the field that removes the regex. `table_handler.extract_tables` exists precisely
 because the chunker needed to know where a table started and ended in the text and had

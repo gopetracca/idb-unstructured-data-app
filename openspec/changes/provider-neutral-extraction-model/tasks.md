@@ -45,8 +45,9 @@
       than one.
 - [ ] 3.4 Convert `boundingRegions[].polygon` to a canonical `BoundingBox` with
       `unit=inch`, `origin=top_left`, retaining the polygon.
-- [ ] 3.5 Fake adapter: same canonical output, including a table whose `rendered` and
-      `header_rendered` are consistent with its `extracted_text`.
+- [ ] 3.5 Fake adapter: same canonical output, including a table whose `rendered`,
+      `render_prefix`, `rows` and `render_suffix` are consistent with its `extracted_text`
+      and satisfy the exactness rule.
 
 ## 4. Use case and storage
 
