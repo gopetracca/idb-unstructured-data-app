@@ -63,3 +63,13 @@ for a real change proposal.
 - **No in-app edge protections** (`edge-protection`), tracked as AIA-483.
 - **Secret-bearing settings are plain strings**, so they can appear in a settings `repr`.
   Tracked outside these specs; see `docs/06-security-and-auth.md` §8.
+- **Blob cleanup is best-effort everywhere and nothing reconciles it**
+  (`blob-artifact-storage`, `content-extraction`, `document-management`). Superseded
+  extraction outputs, the outputs of a run that failed before publishing, and the prefix
+  sweep during document deletion are all deleted on a best-effort basis; each failure is
+  logged and execution continues. Deletion proceeds to the authoritative SQL step
+  regardless, so a container outage during a delete leaves blobs behind *and* removes the
+  record naming them. Nothing retries or reconciles, so those bytes are invisible to the
+  system from then on. The specs state this rather than promise a cleanup guarantee the
+  code does not provide; closing it needs durable retry or a reconciliation sweep, which
+  is a change proposal in its own right.

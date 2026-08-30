@@ -55,9 +55,10 @@ document's artifacts form a single removable subtree.
 The system SHALL overwrite artifacts by default and record their content type, so a
 re-run of a stage replaces its output rather than failing or duplicating — except where a
 stage writes run-scoped outputs, which are never overwritten and are instead superseded by
-moving the reference that locates them. Deleting what a reference displaced is best-effort
-cleanup, not a guarantee: correctness rests on the reference, and deletion of the
-now-unreachable blob is an attempt to reclaim storage.
+moving the reference that locates them. Every artifact deletion in the system is
+best-effort, including the sweep performed when a document is deleted: correctness rests on
+the reference and on the SQL record, never on a blob having been removed. No component
+retries a failed deletion or reconciles what was left behind.
 
 #### Scenario: Re-running a stage
 
@@ -79,10 +80,20 @@ now-unreachable blob is an attempt to reclaim storage.
 - **WHEN** deleting a displaced or abandoned artifact raises
 - **THEN** the failure is logged as a warning and the stage's outcome is unchanged, because the blob is already unreachable — the reference, not the path, is what locates content — so the cost is leaked storage rather than exposure or an inconsistent read
 
-#### Scenario: Leaked artifacts are reclaimed on document deletion
+#### Scenario: Document deletion is where leaked artifacts are ordinarily reclaimed
 
 - **WHEN** a document is deleted after one or more cleanup attempts failed
-- **THEN** the prefix sweep removes the leaked artifacts along with the rest of the document's subtree, so a failed cleanup is bounded by the document's lifetime rather than permanent
+- **THEN** the prefix sweep removes the leaked artifacts along with the rest of the document's subtree, because it sweeps by prefix rather than by enumerating names it would have no way to know
+
+#### Scenario: The final sweep is best-effort too
+
+- **WHEN** the prefix sweep fails while a document is being deleted
+- **THEN** the failure is logged, the authoritative SQL deletion still proceeds, and the artifacts remain — and because the record that named them is now gone, nothing in the system reports them and reclaiming them needs reconciliation outside these capabilities
+
+#### Scenario: No component reconciles leaked artifacts
+
+- **WHEN** any cleanup attempt has failed
+- **THEN** no retry, sweep, or reconciliation runs later on its own, so the leak persists until something outside these capabilities removes it
 
 #### Scenario: Content type recorded
 
