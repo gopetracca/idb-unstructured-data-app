@@ -114,6 +114,10 @@ class ProcessDocumentUseCase:
 
             source_blob_path = doc.document.raw_blob_ref
 
+            # What this document's raw analysis currently points at, if anything. Kept so
+            # a failed run can be told from a successful one that superseded it.
+            previous_analysis_ref = doc.document.analysis_blob_ref
+
             # Check if blob exists
             exists = await self._blob_client.blob_exists(
                 request.source_container, source_blob_path
@@ -155,9 +159,11 @@ class ProcessDocumentUseCase:
                 file_version=doc.document.file_version,
             )
 
-            # Store the verbatim analysis first: whether it landed is recorded in the
-            # extraction metadata that text.json carries, so it has to be known before
-            # text.json is serialised.
+            # Write the verbatim analysis to a path unique to this run, so it cannot
+            # overwrite the sidecar a previous run published. Whether it landed is a fact
+            # text.json has to report, so it has to be known before text.json is
+            # serialised — which is why this comes first and why it must not touch
+            # anything the previous run still owns.
             analysis_blob_path = await self._store_raw_analysis(request, markdown_output)
             markdown_output.extraction_metadata.raw_analysis_stored = (
                 analysis_blob_path is not None
@@ -175,23 +181,30 @@ class ProcessDocumentUseCase:
                     content_type="application/json; charset=utf-8",
                 )
             except Exception:
-                # Both artefacts live at fixed paths, so the sidecar written moments ago
-                # has already replaced the previous run's. Leaving it there would pair a
-                # new analysis.json with the text.json still on disk from the earlier run
-                # — two halves of different extractions, indistinguishable to a reader.
-                await self._unpublish_raw_analysis(request, analysis_blob_path)
+                # This run is over and nothing points at its sidecar, so drop it. The
+                # previous run's text.json, analysis.json and references are all still in
+                # place and still describe each other — a failed reprocess leaves a
+                # completed one exactly as it was.
+                await self._discard_unreferenced_analysis(request, analysis_blob_path)
                 raise
 
-            # Store blob references in SQL (SSOT for content location). When this run
-            # produced no sidecar, the reference is cleared rather than left alone: a
-            # re-processed document would otherwise keep pointing at the previous run's
-            # analysis.json while its text.json says raw_analysis_stored=false.
+            # Publish: until the reference moves, the sidecar this run wrote is
+            # unreachable, because the document row is the only way to locate it. When
+            # this run produced no sidecar the reference is cleared rather than left
+            # alone, so it cannot keep pointing at the previous run's analysis while the
+            # text.json beside it says raw_analysis_stored=false.
             await self._pipeline_store.update_blob_references(
                 tenant_id=request.tenant_id,
                 file_id=request.file_id,
                 text_blob_ref=output_blob_path,
                 analysis_blob_ref=analysis_blob_path,
                 clear_analysis_blob_ref=analysis_blob_path is None,
+            )
+
+            # The superseded sidecar described the text.json this run just replaced, so
+            # nothing can pair with it any more.
+            await self._discard_unreferenced_analysis(
+                request, previous_analysis_ref, superseded_by=analysis_blob_path
             )
 
             # Calculate processing time
@@ -261,18 +274,27 @@ class ProcessDocumentUseCase:
         request: DocumentAnalysisRequest,
         markdown_output: MarkdownOutput,
     ) -> str | None:
-        """Persist the verbatim analysis response as a sidecar blob.
+        """Persist the verbatim analysis response under a path unique to this run.
 
         Returns the blob path, or None if there was nothing to store, persistence is
         disabled, or the write failed. A failure here is deliberately not fatal: text.json
         and its blob reference are the pipeline's contract, and losing the sidecar
         degrades fidelity without breaking the document. The loss is visible afterwards as
         `extraction_metadata.raw_analysis_stored=false` and a null `analysis_blob_ref`.
+
+        The path is run-scoped rather than fixed. A fixed `analysis.json` would be
+        overwritten in place on every reprocess, so a run that later failed to store its
+        text.json would already have destroyed the previous run's raw payload — leaving a
+        published text.json describing an analysis that no longer exists. Locating the
+        sidecar is the reference's job anyway; this codebase never reconstructs blob paths
+        by convention.
         """
         if not self._persist_raw_analysis or markdown_output.raw_analysis is None:
             return None
 
-        blob_path = f"{request.tenant_id}/{request.file_id}/analysis.json"
+        blob_path = (
+            f"{request.tenant_id}/{request.file_id}/analysis/{uuid.uuid4().hex}.json"
+        )
         try:
             await self._blob_client.upload_blob(
                 container=request.output_container,
@@ -297,47 +319,30 @@ class ProcessDocumentUseCase:
         )
         return blob_path
 
-    async def _unpublish_raw_analysis(
+    async def _discard_unreferenced_analysis(
         self,
         request: DocumentAnalysisRequest,
-        analysis_blob_path: str | None,
+        blob_path: str | None,
+        superseded_by: str | None = None,
     ) -> None:
-        """Undo this run's sidecar after the text output failed to store.
+        """Delete a sidecar nothing points at any more.
 
-        Clearing the reference is the part that matters: the document row is the source of
-        truth for where content lives, so a null `analysis_blob_ref` means no reader can
-        reach the orphaned sidecar even if the delete below does not land. The delete is
-        cleanup on top of that, not the safety property.
-
-        Everything here is best-effort. The run is already failing and will be reported as
-        such; a failure to tidy up must not replace that error with a less informative one.
+        Called for this run's sidecar when the text write failed, and for the previous
+        run's once the reference has moved past it. Best-effort in both cases: the blob is
+        already unreachable — the document row is the source of truth for content location
+        — so failing to delete it leaks storage rather than exposing a stale pairing, and
+        `delete_document` sweeps it with the `{tenant_id}/{file_id}/` prefix regardless.
         """
-        if analysis_blob_path is None:
+        if blob_path is None or blob_path == superseded_by:
             return
 
         try:
-            await self._blob_client.delete_blob(
-                request.output_container, analysis_blob_path
-            )
+            await self._blob_client.delete_blob(request.output_container, blob_path)
         except Exception:
             logger.warning(
-                "Could not delete the superseded raw analysis: file_id=%s, blob_path=%s",
+                "Could not delete an unreferenced raw analysis: file_id=%s, blob_path=%s",
                 request.file_id,
-                analysis_blob_path,
-                exc_info=True,
-            )
-
-        try:
-            await self._pipeline_store.update_blob_references(
-                tenant_id=request.tenant_id,
-                file_id=request.file_id,
-                clear_analysis_blob_ref=True,
-            )
-        except Exception:
-            logger.warning(
-                "Could not clear the raw analysis reference after a failed text write: "
-                "file_id=%s",
-                request.file_id,
+                blob_path,
                 exc_info=True,
             )
 

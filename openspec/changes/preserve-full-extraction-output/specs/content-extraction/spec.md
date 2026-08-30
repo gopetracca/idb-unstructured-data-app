@@ -10,9 +10,16 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
 #### Scenario: Raw analysis stored verbatim
 
 - **WHEN** extraction succeeds and `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` is true
-- **THEN** the service response is serialised without filtering and written to
-  `{tenant_id}/{file_id}/analysis.json` in the output container, and the document's
-  `analysis_blob_ref` is set to that path before the stage reports success
+- **THEN** the service response is serialised without filtering and written under
+  `{tenant_id}/{file_id}/analysis/` in the output container at a path unique to that run,
+  and the document's `analysis_blob_ref` is set to that path before the stage reports
+  success
+
+#### Scenario: A run never overwrites another run's raw analysis
+
+- **WHEN** a document that already has a stored raw analysis is extracted again
+- **THEN** the new response is written to a different path, and the previous one remains
+  readable until the reference has moved past it
 
 #### Scenario: Fields unknown to the domain model survive
 
@@ -33,10 +40,18 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
 
 #### Scenario: Text output fails to store after the raw analysis was written
 
-- **WHEN** `analysis.json` has been written and the subsequent `text.json` write fails
-- **THEN** the raw analysis is unpublished — `analysis_blob_ref` is cleared and the stored
-  `analysis.json` removed — so the previous run's `text.json` is never paired with this
-  run's analysis, and the original failure is the error that surfaces
+- **WHEN** the raw analysis has been written and the subsequent `text.json` write fails
+- **THEN** the last completed extraction is unchanged — its `text.json`, its raw analysis
+  and its blob references all still describe each other — the failed run's raw analysis is
+  discarded because nothing references it, and the original failure is the error that
+  surfaces
+
+#### Scenario: Superseded raw analysis is not kept
+
+- **WHEN** a re-extraction completes and the reference moves to the new raw analysis, or
+  completes without one and the reference is cleared
+- **THEN** the raw analysis the reference pointed at before is deleted, since the
+  `text.json` it described has been replaced
 
 #### Scenario: Document extracted before this capability existed
 

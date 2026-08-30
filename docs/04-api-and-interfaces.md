@@ -988,7 +988,7 @@ row, which stays the source of truth for where content lives.
 | Blob | Column | Contents |
 | --- | --- | --- |
 | `{tenant_id}/{file_id}/text.json` | `text_blob_ref` | The typed extraction output consumed by the pipeline |
-| `{tenant_id}/{file_id}/analysis.json` | `analysis_blob_ref` | The Document Intelligence response, verbatim |
+| `{tenant_id}/{file_id}/analysis/{run}.json` | `analysis_blob_ref` | The Document Intelligence response, verbatim |
 
 `text.json` carries the markdown *and* the document's structure. Fields are additive: the
 original `extracted_text`, `pages[].text`, `pages[].word_count` and `extraction_metadata`
@@ -1051,19 +1051,30 @@ Two things make this usable rather than merely verbose:
 - **Spans are offsets into `extracted_text`.** Any element can be mapped back onto the
   markdown a chunk was cut from, and `bounding_regions` map it onto the page.
 
-`analysis.json` is the service response as received, including fields this API does not
+The raw analysis is the service response as received, including fields this API does not
 model. It exists so that a future need — or a newer service version — does not require
 re-analysing the document, which is the most expensive operation in the pipeline.
 
+Unlike `text.json`, its path is **unique per extraction run**, and `analysis_blob_ref` is
+the only way to locate it — never reconstruct the path. Two consequences worth knowing:
+
+- A re-extraction cannot damage the last completed one. The new response goes to a new
+  path, and the reference moves to it only after `text.json` is safely stored, so a run
+  that fails midway leaves the previous `text.json` and its raw analysis intact and still
+  describing each other.
+- The superseded raw analysis is deleted once the reference has moved past it, so runs do
+  not accumulate one file each. If that delete fails the blob is orphaned but unreachable,
+  and `delete_document` sweeps it with the rest of the document's prefix.
+
 **Settings:**
 
-- `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` (default `true`) — write `analysis.json`.
-  Set it to `false` where blob volume matters; `analysis.json` runs several times the size
+- `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` (default `true`) — store the raw analysis.
+  Set it to `false` where blob volume matters; the raw analysis runs several times the size
   of `text.json` on table-heavy documents. The structural fields in `text.json` are not
   gated by this setting.
 
-A failed `analysis.json` write does not fail extraction: the response is still `202`, and
-the loss is visible afterwards as `raw_analysis_stored: false` with a null
+A failed raw-analysis write does not fail extraction: the response is still `202`, and the
+loss is visible afterwards as `raw_analysis_stored: false` with a null
 `analysis_blob_ref`. A null `analysis_blob_ref` also means "extracted before the raw
 response was kept" — documents processed before this feature have no sidecar and are not
 backfilled.

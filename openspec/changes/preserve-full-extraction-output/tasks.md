@@ -115,7 +115,7 @@
   points at it, and `delete_document` already removes it with the `{tenant}/{file_id}/`
   prefix, so deleting it here would add a failure mode without removing a stale read path.
 
-## Follow-up from review (second pass)
+## Follow-up from review (second and third pass)
 
 - **A torn pair across a failed text write.** Both artefacts sit at fixed paths, so a
   re-run overwrites them in place. The sidecar is written first — its outcome is a fact
@@ -127,5 +127,12 @@
   so the original failure is what surfaces. `BlobClientPort` gained `delete_blob`, aliased
   on `BlobStoreAdapter` the same way `upload_blob` and `blob_exists` already are.
 - Regression coverage asserts on *stored bytes*, not on upload calls — asserting on calls
-  cannot see two fixed-path artefacts overwriting each other across runs. Verified the
-  tests fail without the fix: 4 of the 5 do.
+  cannot see two fixed-path artefacts overwriting each other across runs.
+- **Deleting the superseded sidecar was the wrong rollback.** Rolling back destroyed the
+  *previous* run's raw payload, because the fixed path had already been overwritten before
+  the failure. The sidecar now goes to a run-scoped path
+  (`{tenant}/{file_id}/analysis/{run}.json`) and is published by moving the reference to
+  it, which only happens once `text.json` is stored. A failed reprocess therefore leaves
+  the last completed run untouched. The superseded sidecar is deleted after the reference
+  moves past it, so runs do not accumulate one file each. Verified the regression tests
+  fail with a fixed path restored: 4 of 7 do.

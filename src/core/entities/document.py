@@ -48,7 +48,8 @@ class Document(BaseModel):
     analysis_blob_ref: str | None = Field(
         default=None,
         description=(
-            "Blob storage path for the verbatim extraction-service response. "
+            "Blob storage path for the verbatim extraction-service response. The path is "
+            "unique per extraction run, so this column is the only way to locate it. "
             "Null means the raw analysis was not captured — either the document was "
             "extracted before it was preserved, or persistence was disabled."
         ),
