@@ -33,7 +33,12 @@ document's artifacts form a single removable subtree.
 #### Scenario: Path shapes
 
 - **WHEN** artifacts are written
-- **THEN** the raw file goes to `{tenant_id}/{file_id}/{filename}`, extracted text to `{tenant_id}/{file_id}/text.json`, each chunk to `{tenant_id}/{file_id}/chunks/{chunk_id}.json`, and each embedding under `{tenant_id}/{file_id}/embeddings/`
+- **THEN** the raw file goes to `{tenant_id}/{file_id}/{filename}`, the extraction stage's text output and raw analysis under `{tenant_id}/{file_id}/text/` and `{tenant_id}/{file_id}/analysis/` at a path unique to the run that produced them, each chunk to `{tenant_id}/{file_id}/chunks/{chunk_id}.json`, and each embedding under `{tenant_id}/{file_id}/embeddings/`
+
+#### Scenario: Run-scoped artifacts are located by reference, not by name
+
+- **WHEN** a consumer needs the extraction stage's text output or raw analysis
+- **THEN** it follows `text_blob_ref` or `analysis_blob_ref` on the document, because the filename is unique to a run and cannot be derived from the tenant and file identifier alone
 
 #### Scenario: Deleting a document's artifacts
 
@@ -48,12 +53,47 @@ document's artifacts form a single removable subtree.
 ### Requirement: Artifact Write Semantics
 
 The system SHALL overwrite artifacts by default and record their content type, so a
-re-run of a stage replaces its output rather than failing or duplicating.
+re-run of a stage replaces its output rather than failing or duplicating — except where a
+stage writes run-scoped outputs, which are never overwritten and are instead superseded by
+moving the reference that locates them. Every artifact deletion in the system is
+best-effort, including the sweep performed when a document is deleted: correctness rests on
+the reference and on the SQL record, never on a blob having been removed. No component
+retries a failed deletion or reconciles what was left behind.
 
 #### Scenario: Re-running a stage
 
 - **WHEN** a stage writes an artifact whose path already exists
 - **THEN** the existing blob is overwritten
+
+#### Scenario: Re-running the extraction stage
+
+- **WHEN** the extraction stage runs again for a document that already has stored outputs
+- **THEN** it writes to paths unique to the new run, so nothing previously published is overwritten and the document reads as the last completed run left it until the new references are published
+
+#### Scenario: Superseded run-scoped artifacts are cleaned up
+
+- **WHEN** new references are published for a document
+- **THEN** deletion of the artifacts the references previously pointed at is attempted, so unreferenced outputs do not ordinarily accumulate
+
+#### Scenario: Cleanup of a superseded artifact fails
+
+- **WHEN** deleting a displaced or abandoned artifact raises
+- **THEN** the failure is logged as a warning and the stage's outcome is unchanged, because the blob is already unreachable — the reference, not the path, is what locates content — so the cost is leaked storage rather than exposure or an inconsistent read
+
+#### Scenario: Document deletion is where leaked artifacts are ordinarily reclaimed
+
+- **WHEN** a document is deleted after one or more cleanup attempts failed
+- **THEN** the prefix sweep removes the leaked artifacts along with the rest of the document's subtree, because it sweeps by prefix rather than by enumerating names it would have no way to know
+
+#### Scenario: The final sweep is best-effort too
+
+- **WHEN** the prefix sweep fails while a document is being deleted
+- **THEN** the failure is logged, the authoritative SQL deletion still proceeds, and the artifacts remain — and because the record that named them is now gone, nothing in the system reports them and reclaiming them needs reconciliation outside these capabilities
+
+#### Scenario: No component reconciles leaked artifacts
+
+- **WHEN** any cleanup attempt has failed
+- **THEN** no retry, sweep, or reconciliation runs later on its own, so the leak persists until something outside these capabilities removes it
 
 #### Scenario: Content type recorded
 
