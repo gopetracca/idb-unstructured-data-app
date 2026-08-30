@@ -33,7 +33,12 @@ document's artifacts form a single removable subtree.
 #### Scenario: Path shapes
 
 - **WHEN** artifacts are written
-- **THEN** the raw file goes to `{tenant_id}/{file_id}/{filename}`, extracted text to `{tenant_id}/{file_id}/text.json`, each chunk to `{tenant_id}/{file_id}/chunks/{chunk_id}.json`, and each embedding under `{tenant_id}/{file_id}/embeddings/`
+- **THEN** the raw file goes to `{tenant_id}/{file_id}/{filename}`, the extraction stage's text output and raw analysis under `{tenant_id}/{file_id}/text/` and `{tenant_id}/{file_id}/analysis/` at a path unique to the run that produced them, each chunk to `{tenant_id}/{file_id}/chunks/{chunk_id}.json`, and each embedding under `{tenant_id}/{file_id}/embeddings/`
+
+#### Scenario: Run-scoped artifacts are located by reference, not by name
+
+- **WHEN** a consumer needs the extraction stage's text output or raw analysis
+- **THEN** it follows `text_blob_ref` or `analysis_blob_ref` on the document, because the filename is unique to a run and cannot be derived from the tenant and file identifier alone
 
 #### Scenario: Deleting a document's artifacts
 
@@ -48,12 +53,24 @@ document's artifacts form a single removable subtree.
 ### Requirement: Artifact Write Semantics
 
 The system SHALL overwrite artifacts by default and record their content type, so a
-re-run of a stage replaces its output rather than failing or duplicating.
+re-run of a stage replaces its output rather than failing or duplicating — except where a
+stage writes run-scoped outputs, which are never overwritten and are instead superseded by
+moving the reference and deleting what it displaced.
 
 #### Scenario: Re-running a stage
 
 - **WHEN** a stage writes an artifact whose path already exists
 - **THEN** the existing blob is overwritten
+
+#### Scenario: Re-running the extraction stage
+
+- **WHEN** the extraction stage runs again for a document that already has stored outputs
+- **THEN** it writes to paths unique to the new run, so nothing previously published is overwritten and the document reads as the last completed run left it until the new references are published
+
+#### Scenario: Superseded run-scoped artifacts are removed
+
+- **WHEN** new references are published for a document
+- **THEN** the artifacts the references previously pointed at are deleted, so unreferenced outputs do not accumulate
 
 #### Scenario: Content type recorded
 
