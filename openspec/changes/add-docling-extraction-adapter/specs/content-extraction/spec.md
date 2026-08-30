@@ -78,30 +78,66 @@ analysis uses, so a mixed corpus is unambiguous.
 - **WHEN** a `text.json` has no `analysis_format`
 - **THEN** it is read as Azure Document Intelligence output and no error is raised
 
-### Requirement: Bounded In-Process Conversion
+### Requirement: In-Process Conversion Is Terminable
 
-In-process extraction SHALL be bounded so that it cannot outlive the queue message
-visibility timeout, and SHALL fail with a stated reason rather than run past its deadline.
+In-process extraction SHALL run where it can be forcibly terminated, and the system SHALL
+guarantee that a conversion has stopped consuming CPU before the queue can redeliver its
+message. Cancelling an awaitable SHALL NOT be relied on as the termination mechanism.
 
-#### Scenario: Conversion exceeds its budget
+#### Scenario: Hard deadline terminates the work
 
-- **WHEN** a Docling conversion runs longer than `DOCLING_CONVERSION_TIMEOUT_SECONDS`
-- **THEN** it is abandoned, the `convert` stage is marked failed with reason `conversion_timeout`, and the message is not left running past the point where the queue makes it visible again
+- **WHEN** a conversion is still running at its hard deadline
+- **THEN** the execution context running it is killed, its CPU and memory are reclaimed, and the `convert` stage is marked failed with reason `conversion_timeout`
 
-#### Scenario: Timeout stays inside the visibility window
+#### Scenario: Termination does not depend on the conversion cooperating
 
-- **WHEN** the conversion timeout is configured
-- **THEN** its default is below the queue visibility timeout, so a timed-out conversion fails before the same message can be redelivered to a second worker
+- **WHEN** a conversion is inside an operation that never checks for cancellation, such as a single model inference
+- **THEN** it is still terminated at the hard deadline, so the guarantee does not rest on the conversion library yielding control
+
+#### Scenario: No overlap with a redelivered message
+
+- **WHEN** the hard deadline is configured
+- **THEN** it leaves enough of the queue visibility timeout for the stage's remaining work — blob writes and metadata updates — to finish, so no conversion is ever running at the moment its own message becomes visible again
+
+#### Scenario: Termination is proven, not assumed
+
+- **WHEN** the termination path is tested
+- **THEN** a conversion that ignores cooperative cancellation is shown to have actually stopped within the deadline, rather than the test only asserting that the awaiting call returned
+
+#### Scenario: A killed conversion does not take the worker with it
+
+- **WHEN** a conversion is terminated, or dies on its own from memory exhaustion
+- **THEN** the trigger records the stage failure and the worker continues serving health probes and subsequent messages
+
+### Requirement: Layered Conversion Limits
+
+The system SHALL reject work it cannot finish before starting it, and SHALL bound work in
+progress, so that forced termination is the last resort rather than the normal path.
 
 #### Scenario: Document too large to attempt
 
-- **WHEN** a document exceeds `DOCLING_MAX_PAGES`
-- **THEN** the stage fails immediately with reason `page_limit_exceeded` and the page count, before conversion starts
+- **WHEN** a document exceeds `DOCLING_MAX_PAGES` or the configured maximum file size
+- **THEN** the stage fails immediately with reason `page_limit_exceeded` or `file_size_limit_exceeded`, before conversion starts
 
-#### Scenario: Conversion does not block the worker
+#### Scenario: Cooperative timeout bounds overshoot
 
-- **WHEN** a conversion runs
-- **THEN** it executes off the event loop under a bounded concurrency limit, so health probes and other triggers on the same worker continue to be served
+- **WHEN** a conversion exceeds the engine's own document timeout
+- **THEN** the engine stops at its next checkpoint and the stage fails with reason `conversion_timeout`, without waiting for the hard deadline
+
+#### Scenario: Cooperative timeout is set below the hard deadline
+
+- **WHEN** both limits are configured
+- **THEN** the engine's own timeout is the shorter, so the ordinary slow document ends cooperatively and forced termination is reserved for the case where that fails
+
+#### Scenario: Partial results are not stored as complete
+
+- **WHEN** a conversion reports partial success because a limit was reached
+- **THEN** the stage fails rather than storing a truncated `text.json`, so no document is silently indexed on incomplete text
+
+#### Scenario: Concurrency is bounded by memory, not by the queue
+
+- **WHEN** conversions run concurrently
+- **THEN** the number in flight is limited by configuration sized against per-conversion memory, independently of the queue batch size
 
 ### Requirement: Docling Supported Formats
 

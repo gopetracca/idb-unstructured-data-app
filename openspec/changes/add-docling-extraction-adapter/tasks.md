@@ -6,14 +6,20 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
 
 ## 0. Measure before committing
 
+- [ ] 0.0 Verify the Azure Functions Python worker permits a long-lived subprocess that can
+      be signalled and killed from the trigger process. The hard deadline has no other
+      mechanism; a negative answer invalidates the design and must be found now, not in
+      §3.
 - [ ] 0.1 Assemble a fixture corpus under `tests/fixtures/extraction/` from representative
       IADB documents: a text-heavy publication PDF, a table-heavy operational PDF, a
       scanned/OCR PDF, a DOCX, and one document over 100 pages. Record page counts.
 - [ ] 0.2 Write `scripts/compare_extraction_adapters.py`: run both engines over the corpus
       and report, per document — wall-clock, peak RSS, page count, table count, character
       count, and a markdown similarity score between the two `extracted_text` outputs.
-- [ ] 0.3 Run the harness and record CPU seconds per page and peak RSS per page. These are
-      the numbers the Container Apps sizing in §6 depends on.
+- [ ] 0.3 Run the harness and record CPU seconds per page and peak RSS **per worker
+      process**, including the model-resident baseline. Concurrency is capped by memory, so
+      the per-worker figure — not the per-page one — sets `max_concurrent_conversions` and
+      the Container Apps sizing in §6.
 - [ ] 0.4 Measure the image-size delta with the `docling` extra plus prefetched artifacts,
       and the cold-start delta it causes. Decide from the numbers whether the extra stays
       opt-in per build or becomes the default.
@@ -31,8 +37,10 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       and `docling`, validated by exact match with a startup error naming the accepted
       values on anything else.
 - [ ] 1.2 Add `DoclingSettings` (`DOCLING_` prefix): `artifacts_path`,
-      `conversion_timeout_seconds` (default below the 5-minute queue visibility timeout),
-      `max_pages`, `max_concurrent_conversions`, `do_ocr`, `do_table_structure`.
+      `document_timeout_seconds` (the engine's cooperative bound), `hard_deadline_seconds`
+      (the kill deadline; strictly greater than the cooperative one and strictly less than
+      the queue visibility timeout, validated as such), `max_pages`, `max_file_size_bytes`,
+      `max_concurrent_conversions`, `do_ocr`, `do_table_structure`.
 - [ ] 1.3 Branch `_create_document_intelligence_adapter` in `src/container.py`: explicit
       fake still wins; `docling` selects the Docling adapter; the Azure-unconfigured
       fallback to the fake is unchanged and never selects Docling.
@@ -67,29 +75,43 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
 - [ ] 3.1 `src/infrastructure/docling/adapter.py` implementing `DocumentIntelligencePort`.
       Construct the `DocumentConverter` once with `artifacts_path`; check the artifacts
       exist at construction and raise naming `DOCLING_ARTIFACTS_PATH` if not.
-- [ ] 3.2 Run conversion in a thread executor under a semaphore bounded by
-      `max_concurrent_conversions`, so the queue batch size cannot saturate the worker.
-- [ ] 3.3 Enforce `conversion_timeout_seconds` and fail the stage with reason
-      `conversion_timeout`; enforce `max_pages` before conversion starts with reason
-      `page_limit_exceeded`.
-- [ ] 3.4 `get_supported_formats()` returns Docling's accepted content types, so the
+- [ ] 3.2 Run conversion in a supervised, long-lived worker **subprocess** with the models
+      preloaded, not in a thread executor. At the hard deadline the parent kills the
+      process and respawns it. Cancelling the awaitable is not the termination mechanism
+      and must not be relied on as one.
+- [ ] 3.3 Bound in-flight conversions by `max_concurrent_conversions`, sized against
+      measured per-worker RSS — each worker holds its own copy of the model weights, so
+      this is a memory limit, not a CPU one — and independent of the queue's `batchSize`.
+- [ ] 3.4 Enforce the limits in layers: `max_pages` / max file size before conversion
+      starts (`page_limit_exceeded`, `file_size_limit_exceeded`); Docling's own
+      `document_timeout` as the cooperative bound; the hard deadline as the guarantee. Set
+      `document_timeout` strictly below the hard deadline so a kill is exceptional.
+- [ ] 3.5 Derive the hard deadline from the queue visibility timeout minus a margin for the
+      stage's remaining work (blob writes, metadata update), so no conversion is running
+      when its own message becomes visible again.
+- [ ] 3.6 Treat a partial-success conversion as a stage failure; never store a truncated
+      `text.json`.
+- [ ] 3.7 Log kills distinctly from cooperative timeouts. A rising kill rate means the
+      cooperative timeout is mis-tuned or admission control is too loose, and that should
+      be visible rather than absorbed.
+- [ ] 3.8 `get_supported_formats()` returns Docling's accepted content types, so the
       capabilities and supported-formats endpoints follow the configured engine.
-- [ ] 3.5 `src/infrastructure/docling/mapper.py`: `DoclingDocument` → `MarkdownOutput`.
+- [ ] 3.9 `src/infrastructure/docling/mapper.py`: `DoclingDocument` → `MarkdownOutput`.
       `export_to_markdown()` for `extracted_text`; items grouped by `prov[0].page_no` for
       per-page text; `TableItem.data.grid` cells → table cells, carrying
       `start/end_row_offset_idx`, `start/end_col_offset_idx`, and the `column_header` /
       `row_header` / `row_section` flags; `PictureItem` → figures; page size → page geometry.
-- [ ] 3.6 Map `DocItemLabel` to the paragraph-role vocabulary in an explicit, reviewed
+- [ ] 3.10 Map `DocItemLabel` to the paragraph-role vocabulary in an explicit, reviewed
       table — do not rely on the two vocabularies coinciding. Anything unmapped keeps the
       Docling label verbatim rather than being dropped or guessed.
-- [ ] 3.7 Convert `prov[].bbox` from Docling's bottom-left origin to the stored contract's
+- [ ] 3.11 Convert `prov[].bbox` from Docling's bottom-left origin to the stored contract's
       convention and record the unit. Do not copy coordinates across origins.
-- [ ] 3.8 Leave `spans`, `styles`, and `key_value_pairs` empty; do not synthesise markdown
+- [ ] 3.12 Leave `spans`, `styles`, and `key_value_pairs` empty; do not synthesise markdown
       character offsets. Add a code comment stating why, so it is not "fixed" later.
-- [ ] 3.9 Set `extraction_method` to `docling` and, when raw persistence is on, return the
+- [ ] 3.13 Set `extraction_method` to `docling` and, when raw persistence is on, return the
       serialised `DoclingDocument` as the raw payload with
       `analysis_format=docling-document`.
-- [ ] 3.10 Map Docling's document-level confidence to `extraction_confidence` where
+- [ ] 3.14 Map Docling's document-level confidence to `extraction_confidence` where
       available and leave it unset otherwise. Do not derive a per-word-equivalent number.
 
 ## 4. Contract changes shared by both engines
@@ -116,17 +138,27 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
 - [ ] 5.4 Table reconstruction test mirroring the Azure one: rebuild the grid from stored
       cells alone and assert it tiles `row_count × column_count` without overlap.
 - [ ] 5.5 `tests/unit/infrastructure/docling/test_adapter.py` — artifacts missing raises at
-      construction naming `DOCLING_ARTIFACTS_PATH`; conversion timeout fails with
-      `conversion_timeout`; over-limit page count fails with `page_limit_exceeded` before
-      conversion starts; concurrency is bounded.
-- [ ] 5.6 Cross-engine contract test: the same fixture through both adapters produces
+      construction naming `DOCLING_ARTIFACTS_PATH`; over-limit page count and file size
+      fail before conversion starts; a partial-success result fails the stage rather than
+      storing truncated text; concurrency is bounded.
+- [ ] 5.6 **Termination test — the one that proves the guarantee.** Give the worker a
+      conversion stub that ignores cooperative cancellation entirely (a tight CPU loop).
+      Assert the worker process is gone within the hard deadline by checking the process
+      itself — not merely that the awaiting call returned — and that a subsequent
+      conversion succeeds on the respawned worker. A test that only asserts the coroutine
+      raised would pass against the broken thread-executor design and is not sufficient.
+- [ ] 5.7 Assert the hard deadline is derived to leave margin inside the queue visibility
+      timeout, so the arithmetic cannot silently drift if `host.json` changes.
+- [ ] 5.8 Assert a worker killed mid-conversion, or dying of memory exhaustion, leaves the
+      parent able to serve health probes and process the next message.
+- [ ] 5.9 Cross-engine contract test: the same fixture through both adapters produces
       `MarkdownOutput` objects that validate against the same model and agree on page
       count and table count within a stated tolerance.
-- [ ] 5.7 Chunking regression: `chunk_document` over a Docling-produced `text.json`
+- [ ] 5.10 Chunking regression: `chunk_document` over a Docling-produced `text.json`
       chunks successfully with no engine-specific handling.
-- [ ] 5.8 `tests/unit/presentation/` — capabilities and supported-formats reflect the
+- [ ] 5.11 `tests/unit/presentation/` — capabilities and supported-formats reflect the
       configured engine.
-- [ ] 5.9 Mark any test that needs real model artifacts so it skips cleanly when they are
+- [ ] 5.12 Mark any test that needs real model artifacts so it skips cleanly when they are
       absent; the default `pytest` run must not require them.
 
 ## 6. Docs and spec bookkeeping
@@ -137,8 +169,9 @@ Land `preserve-full-extraction-output` first — it defines the enriched `Markdo
       cost crossover — and derive the Container Apps CPU/memory recommendation from them.
 - [ ] 6.3 Document the mixed-corpus story: `extraction_method` and `analysis_format`
       identify the engine, and output predating the field reads as Azure.
-- [ ] 6.4 State the page-count ceiling implied by the queue visibility timeout, and that
-      raising `visibilityTimeout` is a separate proposal.
+- [ ] 6.4 State the page-count ceiling implied by the queue visibility timeout, the layered
+      limits and which one is the actual guarantee, and that raising `visibilityTimeout` is
+      a separate proposal.
 - [ ] 6.5 Add `src/infrastructure/docling/**` → `content-extraction` to
       `openspec/coverage.md`.
 - [ ] 6.6 Add the ticket row to `openspec/provenance.md` once the Jira key is assigned.

@@ -120,15 +120,9 @@ Past it the message becomes visible again and is reprocessed *while the first at
 still running*, then poisoned on the second failure — duplicated CPU on an already
 CPU-saturated worker, and no clear error explaining it.
 
-So Docling is bounded, not unbounded:
-
-- `DOCLING_CONVERSION_TIMEOUT_SECONDS` defaults comfortably below the visibility timeout;
-  exceeding it fails the `convert` stage with an explicit reason rather than running on.
-- `DOCLING_MAX_PAGES` rejects documents that cannot plausibly finish, before starting work
-  rather than four minutes into it.
-- `batchSize: 4` means up to four concurrent conversions per replica. Unbounded CPU-bound
-  work at that concurrency will starve the event loop and the health probes with it, so
-  conversions run in a thread executor with an explicit concurrency limit.
+So Docling has to be bounded — and the bound has to be one that actually holds. See
+"Decision: conversion runs in a killable process" below, which is where the mechanism is
+argued.
 
 **This constraint is not new.** The Azure adapter awaits its poller inside the same trigger
 under the same timeout. Docling makes an existing latent bound bind much sooner and much
@@ -216,6 +210,73 @@ of its own, and they are build-pipeline work, not adapter work:
 there is no path for any build arg through the ACR workflow. Plumbing that through is a
 prerequisite for enabling the extra in a deployed image.
 
+## Decision: conversion runs in a killable process
+
+A first draft of this change ran conversion in a thread executor and bounded it with
+`asyncio.wait_for`. That does not work, and it is worth writing down why, because the
+mechanism looks correct and is not.
+
+**Cancelling an awaitable does not stop a thread.** `asyncio.wait_for` around
+`run_in_executor` cancels the *await*. The Python thread underneath keeps running
+`DocumentConverter.convert()` to completion — there is no mechanism to interrupt a
+synchronous CPU-bound call in another thread. The stage would report `conversion_timeout`
+while the conversion carried on consuming CPU, and would still be running when the queue
+made the message visible again at five minutes and handed a second worker the same
+document. The failure this change exists to prevent would remain, now hidden behind a
+timeout that appears to handle it.
+
+The same objection disqualifies two other candidates:
+
+- **Docling's own `document_timeout`** is cooperative. It is checked at page and stage
+  boundaries, and a document that breaches it comes back as `PARTIAL_SUCCESS`. That makes
+  it genuinely useful — it ends the ordinary slow document cheaply and in-process — but it
+  cannot interrupt a single long-running model inference, so it cannot be the guarantee.
+- **`ProcessPoolExecutor`** does not help by itself either: cancelling a future whose work
+  has already started does not terminate the process running it. Process *isolation* is
+  necessary; the standard pool's cancellation semantics are not sufficient.
+
+So the guarantee needs a process the supervisor can signal:
+
+Conversion runs in a **supervised worker subprocess**, and at the hard deadline the parent
+kills it outright. This is the only layer that actually reclaims the CPU, and it holds
+regardless of what the conversion is doing when the deadline arrives.
+
+The worker is **long-lived and reused** rather than spawned per document. Model load is
+the dominant fixed cost of a Docling conversion, and paying it per document would eat the
+per-page budget. A worker that is killed is respawned, so the kill path costs one model
+load, not one per conversion.
+
+### The layers, and what each is for
+
+| Layer | Mechanism | Guarantee |
+| --- | --- | --- |
+| Admission control | `max_num_pages`, `max_file_size`, `DOCLING_MAX_PAGES` | Refuses work that cannot finish, before spending anything on it |
+| Cooperative timeout | Docling `document_timeout` | Ends the ordinary slow document at a checkpoint, cheaply. Bounds overshoot; guarantees nothing |
+| Hard deadline | SIGKILL the worker subprocess | Actually stops the work. The guarantee |
+| Queue margin | Hard deadline < visibility timeout, less the stage's remaining work | No conversion is running when its own message reappears |
+
+Ordering matters: the cooperative timeout is set *below* the hard deadline, so the normal
+slow-document path is a clean in-process failure and the kill is genuinely exceptional. If
+kills turn out to be common in practice, that is evidence the cooperative timeout is
+mis-tuned or that admission control is too loose — not something to absorb silently.
+
+### What this costs, and where it lands
+
+**Memory multiplies with concurrency.** Each worker process holds its own copy of the
+model weights. Two workers is roughly two copies. This is the real cap on
+`max_concurrent_conversions` — it is a memory limit, not a CPU limit — and it is why the
+concurrency bound is specified against measured per-conversion RSS rather than against the
+queue's `batchSize: 4`. §0 has to measure per-worker RSS, not just per-page CPU.
+
+**Subprocess execution must be viable under the Functions Python worker.** This is an
+assumption, not a verified fact, and §0 checks it before anything else in the design is
+worth building.
+
+**Partial results are discarded.** A conversion cut off by either timeout has produced
+some pages. Storing them would put a silently truncated `text.json` into the pipeline and
+index a document on incomplete text, with nothing downstream able to tell. The stage fails
+instead.
+
 ## Decision: `analysis.json` is engine-tagged, never engine-guessed
 
 `preserve-full-extraction-output` stores the raw analysis at
@@ -236,8 +297,11 @@ filter that `preserve-full-extraction-output` was written to remove.
 
 - IADB's actual Document Intelligence commitment rate, without which the crossover volume
   cannot be computed.
-- Measured CPU seconds and peak RSS per page on representative IADB documents — decides
-  Container Apps sizing and the concurrency limit.
+- Whether the Azure Functions Python worker permits long-lived subprocesses. The hard
+  deadline has no other mechanism, so a negative answer invalidates the design.
+- Measured CPU seconds per page and peak RSS **per worker process** on representative IADB
+  documents — decides Container Apps sizing, and the concurrency limit is set by memory
+  rather than by CPU.
 - Measured image-size delta with the `docling` extra and the prefetched artifacts, and
   whether it should therefore stay opt-in per build or become the default.
 - Whether markdown-dialect differences between the two engines materially change chunk

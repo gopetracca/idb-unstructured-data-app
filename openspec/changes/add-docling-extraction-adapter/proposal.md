@@ -59,16 +59,18 @@ evidence behind it.
   return is pinned model versions, a build step that verifies the download instead of
   assuming it, and build-args plumbing through the ACR server-side build workflow, which
   accepts none today.
-- **Bounded conversion.** Extraction runs inside a queue trigger whose messages are
+- **Terminable conversion.** Extraction runs inside a queue trigger whose messages are
   invisible for five minutes and poisoned after two dequeues. A CPU-bound Docling
-  conversion of a long document can exceed that and be silently redelivered. The adapter
-  takes `DOCLING_CONVERSION_TIMEOUT_SECONDS` (default comfortably under the visibility
-  timeout) and a page cap, and fails the stage with a clear reason instead of running past
-  the deadline. This constraint exists for the Azure adapter too — Docling makes it bind
-  much sooner.
-- **Off-the-event-loop execution.** Docling's conversion is synchronous and CPU-bound;
-  running it inline would block the Functions worker's event loop for the whole document.
-  It runs in a thread executor with bounded concurrency.
+  conversion of a long document can exceed that and be silently redelivered while the first
+  attempt is still burning CPU. Bounding it needs a mechanism that actually stops the work:
+  cancelling an awaitable does not stop a thread, and Docling's own `document_timeout` is
+  cooperative. Conversion therefore runs in a **supervised worker subprocess** that the
+  parent kills at a hard deadline, behind two cheaper layers — admission control on pages
+  and file size, then the cooperative timeout — so a kill is the exception. This constraint
+  exists for the Azure adapter too; Docling makes it bind much sooner.
+- **Concurrency capped by memory.** Each worker process holds its own copy of the model
+  weights, so `max_concurrent_conversions` is set from measured per-worker RSS rather than
+  from the queue's `batchSize: 4`.
 - **Optional dependency group.** `docling` (and its torch dependency) install under a
   `docling` extra, so deployments that do not use it do not carry the image weight.
 - **An offline comparison harness** under `scripts/`, running both adapters over a fixture
@@ -100,9 +102,12 @@ chunking, vectorization, or search behaviour; GPU inference; Docling's VLM pipel
   - `pyproject.toml` / `uv.lock` — optional `docling` group
   - `scripts/compare_extraction_adapters.py` — new
   - `openspec/coverage.md` — `src/infrastructure/docling/**` → `content-extraction`
-- **Runtime:** Docling shifts extraction from network-bound to CPU-bound. Container Apps
-  CPU/memory for the queue-processing revision has to be sized against measured
-  throughput before this is switched on anywhere real.
+- **Runtime:** Docling shifts extraction from network-bound to CPU-bound, and adds a
+  worker subprocess per concurrent conversion, each holding its own model copy. Container
+  Apps CPU/memory for the queue-processing revision has to be sized against measured
+  per-worker memory and throughput before this is switched on anywhere real. Whether the
+  Functions Python worker permits such a subprocess is an assumption the spike checks
+  first — the hard deadline has no other mechanism.
 - **Image size:** torch plus the model artifacts add substantially to the image — on the
   order of a gigabyte or more. This lands on cold start, on the deploy path, and on ACR
   storage. It must be measured, not assumed, before the extra is enabled in a deployed

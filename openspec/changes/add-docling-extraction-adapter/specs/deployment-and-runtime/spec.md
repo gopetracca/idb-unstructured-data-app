@@ -79,9 +79,14 @@ in-process, because the queue host processes messages in batches on a shared wor
 #### Scenario: Concurrency is bounded independently of the queue batch size
 
 - **WHEN** Docling is the configured engine
-- **THEN** concurrent conversions are limited by configuration rather than implicitly by the queue batch size, so a full batch cannot saturate the worker's CPU
+- **THEN** concurrent conversions are limited by configuration rather than implicitly by the queue batch size, so a full batch cannot saturate the worker
+
+#### Scenario: Memory scales with concurrency, not just with document size
+
+- **WHEN** conversions run in isolated worker processes
+- **THEN** the revision's memory allocation accounts for one resident copy of the model weights per concurrent worker, and the concurrency limit is derived from that allocation
 
 #### Scenario: Sizing is evidence-based
 
 - **WHEN** the Docling engine is enabled in a deployed environment
-- **THEN** the revision's CPU and memory allocation is set from measured per-page CPU time and peak memory on representative documents, and the measurement is recorded in `docs/`
+- **THEN** the revision's CPU and memory allocation is set from measured per-page CPU time and measured peak memory per worker process on representative documents, and the measurement is recorded in `docs/`
