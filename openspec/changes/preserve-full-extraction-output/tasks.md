@@ -114,3 +114,18 @@
 - The now-orphaned `analysis.json` blob from the earlier run is left in place. Nothing
   points at it, and `delete_document` already removes it with the `{tenant}/{file_id}/`
   prefix, so deleting it here would add a failure mode without removing a stale read path.
+
+## Follow-up from review (second pass)
+
+- **A torn pair across a failed text write.** Both artefacts sit at fixed paths, so a
+  re-run overwrites them in place. The sidecar is written first — its outcome is a fact
+  `text.json` has to report — which meant a failing `text.json` write left run 2's
+  `analysis.json` beside run 1's `text.json`, with the row still pointing at both.
+  `ProcessDocumentUseCase` now unpublishes the sidecar when the text write fails: the
+  reference is cleared (the row is the source of truth for content location, so this is
+  the safety property) and the blob deleted (cleanup on top). Both steps are best-effort
+  so the original failure is what surfaces. `BlobClientPort` gained `delete_blob`, aliased
+  on `BlobStoreAdapter` the same way `upload_blob` and `blob_exists` already are.
+- Regression coverage asserts on *stored bytes*, not on upload calls — asserting on calls
+  cannot see two fixed-path artefacts overwriting each other across runs. Verified the
+  tests fail without the fix: 4 of the 5 do.

@@ -35,6 +35,8 @@ class ProcessDocumentUseCase:
     2. Validate content type is supported
     3. Call document intelligence adapter
     4. Store the verbatim analysis response and the markdown output in the text container
+       (the sidecar is rolled back if the text output cannot be stored, so the two are
+       never left describing different runs)
     5. Update pipeline state stage
     6. Return result with markdown URL
     """
@@ -165,12 +167,20 @@ class ProcessDocumentUseCase:
             output_blob_path = f"{request.tenant_id}/{request.file_id}/text.json"
             output_data = json.dumps(markdown_output.model_dump(mode="json"), indent=2)
 
-            await self._blob_client.upload_blob(
-                container=request.output_container,
-                blob_path=output_blob_path,
-                data=output_data,
-                content_type="application/json; charset=utf-8",
-            )
+            try:
+                await self._blob_client.upload_blob(
+                    container=request.output_container,
+                    blob_path=output_blob_path,
+                    data=output_data,
+                    content_type="application/json; charset=utf-8",
+                )
+            except Exception:
+                # Both artefacts live at fixed paths, so the sidecar written moments ago
+                # has already replaced the previous run's. Leaving it there would pair a
+                # new analysis.json with the text.json still on disk from the earlier run
+                # — two halves of different extractions, indistinguishable to a reader.
+                await self._unpublish_raw_analysis(request, analysis_blob_path)
+                raise
 
             # Store blob references in SQL (SSOT for content location). When this run
             # produced no sidecar, the reference is cleared rather than left alone: a
@@ -286,6 +296,50 @@ class ProcessDocumentUseCase:
             blob_path,
         )
         return blob_path
+
+    async def _unpublish_raw_analysis(
+        self,
+        request: DocumentAnalysisRequest,
+        analysis_blob_path: str | None,
+    ) -> None:
+        """Undo this run's sidecar after the text output failed to store.
+
+        Clearing the reference is the part that matters: the document row is the source of
+        truth for where content lives, so a null `analysis_blob_ref` means no reader can
+        reach the orphaned sidecar even if the delete below does not land. The delete is
+        cleanup on top of that, not the safety property.
+
+        Everything here is best-effort. The run is already failing and will be reported as
+        such; a failure to tidy up must not replace that error with a less informative one.
+        """
+        if analysis_blob_path is None:
+            return
+
+        try:
+            await self._blob_client.delete_blob(
+                request.output_container, analysis_blob_path
+            )
+        except Exception:
+            logger.warning(
+                "Could not delete the superseded raw analysis: file_id=%s, blob_path=%s",
+                request.file_id,
+                analysis_blob_path,
+                exc_info=True,
+            )
+
+        try:
+            await self._pipeline_store.update_blob_references(
+                tenant_id=request.tenant_id,
+                file_id=request.file_id,
+                clear_analysis_blob_ref=True,
+            )
+        except Exception:
+            logger.warning(
+                "Could not clear the raw analysis reference after a failed text write: "
+                "file_id=%s",
+                request.file_id,
+                exc_info=True,
+            )
 
     async def _log_stage_transition(
         self,

@@ -31,6 +31,13 @@ for every successful extraction, and SHALL NOT discard elements it does not itse
 - **THEN** the failure is logged as a warning, `extraction_metadata.raw_analysis_stored` is
   false, and the extraction result and its `202` response are unchanged
 
+#### Scenario: Text output fails to store after the raw analysis was written
+
+- **WHEN** `analysis.json` has been written and the subsequent `text.json` write fails
+- **THEN** the raw analysis is unpublished — `analysis_blob_ref` is cleared and the stored
+  `analysis.json` removed — so the previous run's `text.json` is never paired with this
+  run's analysis, and the original failure is the error that surfaces
+
 #### Scenario: Document extracted before this capability existed
 
 - **WHEN** a document's `analysis_blob_ref` is null

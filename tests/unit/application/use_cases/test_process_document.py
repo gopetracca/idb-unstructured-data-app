@@ -776,3 +776,232 @@ class TestReprocessingADocumentThatAlreadyHasASidecar:
 
         assert store.text_blob_ref == f"{sample_tenant_id}/{sample_file_id}/text.json"
         assert store.raw_blob_ref == sample_document_with_pipeline.document.raw_blob_ref
+
+
+class FakeBlobContainer:
+    """A blob container that keeps what was written, keyed by path.
+
+    Fixed-path artefacts overwrite each other across runs, which is the whole reason a
+    half-finished run can leave two files describing different extractions. Asserting on
+    upload calls cannot see that; asserting on stored bytes can.
+    """
+
+    def __init__(self):
+        self.blobs: dict[str, str] = {}
+        self.fail_on: set[str] = set()
+        self.deleted: list[str] = []
+
+    async def upload_blob(self, container, blob_path, data, content_type=None, **kwargs):
+        if blob_path in self.fail_on:
+            raise RuntimeError(f"blob storage said no: {blob_path}")
+        self.blobs[blob_path] = data
+        return {"etag": "etag", "url": f"https://blob/{blob_path}"}
+
+    async def delete_blob(self, container, blob_path):
+        self.deleted.append(blob_path)
+        return self.blobs.pop(blob_path, None) is not None
+
+    async def download_blob(self, container, blob_path):
+        return b"%PDF-1.4 fake pdf content"
+
+    async def blob_exists(self, container, blob_path):
+        return True
+
+
+class TestAFailedTextWriteDoesNotStrandANewSidecar:
+    """text.json and analysis.json must never come from different runs.
+
+    Both sit at fixed paths, so a re-run overwrites them in place. The sidecar is written
+    first — its outcome is a fact `text.json` has to report — which means a failure to
+    store text.json would otherwise leave run 2's analysis.json beside run 1's text.json,
+    with the row still pointing at both.
+    """
+
+    @pytest.fixture
+    def request_(self, sample_file_id: str, sample_tenant_id: str) -> DocumentAnalysisRequest:
+        return DocumentAnalysisRequest(
+            file_id=sample_file_id,
+            tenant_id=sample_tenant_id,
+            source_container="raw",
+            output_container="text",
+        )
+
+    @pytest.fixture
+    def blobs(self) -> FakeBlobContainer:
+        return FakeBlobContainer()
+
+    @pytest.fixture
+    def store(self, sample_document_with_pipeline) -> StatefulBlobReferences:
+        return StatefulBlobReferences(sample_document_with_pipeline)
+
+    @staticmethod
+    def _output(sample_markdown_output: MarkdownOutput, marker: str) -> MarkdownOutput:
+        """An analysis output tagged so the run it came from is identifiable."""
+        return sample_markdown_output.model_copy(
+            update={
+                "extracted_text": f"text from {marker}",
+                "raw_analysis": {"modelId": "prebuilt-layout", "run": marker},
+            }
+        )
+
+    async def _run(self, blobs, adapter, store, output, request_):
+        use_case = build_use_case(blobs, adapter, store, output, persist_raw_analysis=True)
+        return await use_case.execute(request_)
+
+    async def test_the_pair_stays_from_the_same_run(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
+        analysis_path = f"{sample_tenant_id}/{sample_file_id}/analysis.json"
+
+        await self._run(
+            blobs,
+            mock_document_intelligence_adapter,
+            store,
+            self._output(sample_markdown_output, "run-1"),
+            request_,
+        )
+        assert json.loads(blobs.blobs[analysis_path])["run"] == "run-1"
+
+        # Re-extract; this time the text output cannot be stored.
+        blobs.fail_on.add(text_path)
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-2"),
+                request_,
+            )
+
+        # run-1's text.json is still there, and run-2's analysis.json is not beside it.
+        assert json.loads(blobs.blobs[text_path])["extracted_text"] == "text from run-1"
+        assert analysis_path not in blobs.blobs
+
+    async def test_the_reference_is_cleared_so_nothing_can_reach_the_orphan(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """The row is the source of truth for content location — that is the safety net."""
+        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
+
+        await self._run(
+            blobs,
+            mock_document_intelligence_adapter,
+            store,
+            self._output(sample_markdown_output, "run-1"),
+            request_,
+        )
+        assert store.analysis_blob_ref is not None
+
+        blobs.fail_on.add(text_path)
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-2"),
+                request_,
+            )
+
+        assert store.analysis_blob_ref is None
+
+    async def test_the_reference_is_cleared_even_if_the_delete_fails(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """Deleting is cleanup; clearing the reference is what makes the orphan unreachable."""
+        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
+
+        await self._run(
+            blobs,
+            mock_document_intelligence_adapter,
+            store,
+            self._output(sample_markdown_output, "run-1"),
+            request_,
+        )
+
+        blobs.fail_on.add(text_path)
+        blobs.delete_blob = AsyncMock(side_effect=RuntimeError("delete refused"))
+
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-2"),
+                request_,
+            )
+
+        assert store.analysis_blob_ref is None
+
+    async def test_the_original_failure_is_what_surfaces(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """Tidying up must not replace the real error with a less informative one."""
+        text_path = f"{sample_tenant_id}/{sample_file_id}/text.json"
+        blobs.fail_on.add(text_path)
+        blobs.delete_blob = AsyncMock(side_effect=RuntimeError("delete refused"))
+        store.update_blob_references = AsyncMock(side_effect=RuntimeError("sql refused"))
+
+        with pytest.raises(DocumentProcessingError) as exc_info:
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-1"),
+                request_,
+            )
+
+        assert "blob storage said no" in str(exc_info.value)
+
+    async def test_a_first_run_that_fails_leaves_nothing_behind(
+        self,
+        blobs,
+        store,
+        mock_document_intelligence_adapter,
+        sample_markdown_output,
+        request_,
+        sample_tenant_id,
+        sample_file_id,
+    ):
+        """No previous artefacts to protect, but no orphan sidecar either."""
+        blobs.fail_on.add(f"{sample_tenant_id}/{sample_file_id}/text.json")
+
+        with pytest.raises(DocumentProcessingError):
+            await self._run(
+                blobs,
+                mock_document_intelligence_adapter,
+                store,
+                self._output(sample_markdown_output, "run-1"),
+                request_,
+            )
+
+        assert blobs.blobs == {}
+        assert store.analysis_blob_ref is None

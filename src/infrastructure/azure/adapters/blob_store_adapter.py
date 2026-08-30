@@ -110,6 +110,10 @@ class BlobStoreAdapter(BlobStorePort, BlobClientPort):
         """Check if a blob exists using client-style semantics."""
         return await self._client.blob_exists(container, blob_path)
 
+    async def delete_blob(self, container: str, blob_path: str) -> bool:
+        """Delete a blob using client-style semantics."""
+        return await self._client.delete_blob(container, blob_path)
+
     async def download_blob(self, container: str, blob_path: str) -> bytes:
         """Download blob content."""
         return await self._client.download_blob(container, blob_path)
