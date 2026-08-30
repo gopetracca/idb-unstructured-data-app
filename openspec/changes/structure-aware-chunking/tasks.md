@@ -50,8 +50,12 @@
       whole; a table with no header splits without a prefix.
 - [ ] 5.2 The same document rendered as HTML and as pipe tables produces identical chunk
       boundaries and metadata — the provider-independence claim, as a test.
-- [ ] 5.3 `chunk_document` tests: block-list path and fallback path both produce chunks
-      whose `start_char`/`end_char` resolve against the extracted text.
+- [ ] 5.3 `chunk_document` tests: on both the block-list path and the fallback path, every
+      chunk's `start_char`/`end_char` delimit a valid range of `extracted_text` covering the
+      content that chunk derives from — which is *not* the same as equalling the chunk's
+      text. Whether the text equals that slice is a separate property, true for prose and
+      deliberately false for a table piece carrying a repeated header; 5.7 asserts both
+      cases. This task must not be written as "the offsets reconstruct the chunk".
 - [ ] 5.4 Both chunker adapters produce the same table chunks for the same input.
 - [ ] 5.5 A regression for the defect that motivated this: a table larger than the chunk
       size must not produce a single chunk exceeding it.

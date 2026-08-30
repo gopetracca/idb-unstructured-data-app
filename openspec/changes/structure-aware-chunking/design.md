@@ -74,6 +74,14 @@ property that makes a piece independently interpretable, which is the point of t
 The other alternative — storing the composed text's own offsets — is meaningless, since the
 composed text exists nowhere but in the chunk.
 
+**Two properties, easily conflated.** "The offsets delimit a valid range of the source" and
+"the chunk's text equals the text at those offsets" are different claims. The first holds
+for every chunk; the second holds for prose and is deliberately false for a table piece
+carrying a repeated header. Anything written as "offsets resolve against the extracted
+text" is ambiguous between them and should be avoided — an earlier draft of the test tasks
+carried exactly that phrasing and contradicted this decision three lines above where it was
+stated.
+
 ## Decision: measure retrieval rather than assert it
 
 The proposal claims this improves retrieval on tabular questions. That is a hypothesis.
