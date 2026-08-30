@@ -1071,9 +1071,12 @@ re-analysing the document, which is the most expensive operation in the pipeline
 **Settings:**
 
 - `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` (default `true`) — store the raw analysis.
-  Set it to `false` where blob volume matters; the raw analysis runs several times the size
-  of `text.json` on table-heavy documents. The structural fields in `text.json` are not
-  gated by this setting.
+  Set it to `false` where blob volume matters. On a one-page table-bearing PDF measured
+  against the real service the raw analysis was 8.8 KB against 9.6 KB for `text.json` — the
+  two are the same order of magnitude, because the typed projection re-states per-page
+  words and lines that the raw response holds once. Expect that ratio to shift with
+  document shape rather than to hold. The structural fields in `text.json` are not gated by
+  this setting.
 
 A failed raw-analysis write does not fail extraction: the response is still `202`, and the
 loss is visible afterwards as `raw_analysis_stored: false` with a null

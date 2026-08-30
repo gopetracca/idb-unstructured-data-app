@@ -91,10 +91,10 @@
 
 ## Deviations and gaps
 
-- **The live Azure tests have never been run.** No Document Intelligence endpoint or key
-  is available in this workspace, so `tests/integration/infrastructure/test_document_intelligence_live.py`
-  has only been shown to skip cleanly. Its offline half — the PDF builder and the
-  reconstruction assertions it shares with the unit tests — does run.
+- **The live Azure tests have now been run** against the real service (`prebuilt-layout`,
+  API `2024-11-30`): 14 passed. The generated PDF's table came back reconstructible from
+  its cells alone, merged header cell included, and the spans resolved against the returned
+  markdown. See "Live verification" below.
 - **Migration 011 has now been executed** against SQL Server 2022 in a container — see
   task 4.7. The earlier note that it was unverified no longer applies.
 - Marked the test files this change touches with `@pytest.mark.unit`. CI runs
@@ -204,3 +204,38 @@ the `202` response. Both are captured in the `content-extraction` delta and `doc
   which every pair written is displaced by exactly one publisher except the one the row
   ends up naming. Verified they discriminate — restoring the read-then-write makes the
   eight-way test fail.
+
+## Live verification
+
+Run against the configured Document Intelligence resource with
+`DOCUMENT_INTELLIGENCE_RUN_TESTS=on`. 14 tests passed, and a one-off script printed what
+actually came back:
+
+```
+model: prebuilt-layout | api: 2024-11-30 | format: markdown
+pages: 1 words: 19 tables: 1 paragraphs: 9 confidence: 0.9944
+
+TABLE RECONSTRUCTED FROM CELLS ALONE (4x2):
+    ['Budget Summary', 'Budget Summary']
+    ['Year', 'Amount']
+    ['2025', '980']
+    ['2026', '1250']
+merged cell: 'Budget Summary' spans 2 cols; kind: columnHeader | page: 1 | polygon pts: 8
+paragraph roles: ['title']
+page geometry: 8.5 x 11.0 inch | lines: 9 | words: 19
+RAW SIDECAR keys: ['apiVersion', 'content', 'contentFormat', 'modelId', 'pages',
+                   'paragraphs', 'sections', 'stringIndexType', 'tables']
+raw bytes: 8756 | text.json bytes: 9555
+```
+
+Three things worth recording from it:
+
+- **The premise of this change is visible in the output.** The markdown the service returns
+  renders the table as raw HTML — `<table><tr><th colspan="2">Budget Summary</th>...` —
+  which is exactly why the rendered text cannot stand in for the cell grid. The
+  reconstruction above uses only `tables[].cells`.
+- **The escape hatch earns its place.** The raw sidecar carries `stringIndexType`, a field
+  the typed model does not declare. Under the previous mapping it was simply gone.
+- **The size claim in the proposal was wrong** and has been corrected. The sidecar was
+  *smaller* than `text.json` here (8.8 KB vs 9.6 KB), because the typed projection restates
+  per-page words and lines that the raw response holds once.

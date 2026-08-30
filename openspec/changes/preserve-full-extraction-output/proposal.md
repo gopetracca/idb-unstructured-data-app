@@ -74,6 +74,8 @@ follow-on work.
   - `src/core/entities/document.py`, `src/infrastructure/sqlserver/models/file_model.py`,
     new Alembic revision `011_add_analysis_blob_ref.py`
   - `src/config/settings.py` — `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT`
-- Storage: `analysis.json` is typically several times the size of `text.json` for
-  table-heavy documents. Blob cost, not latency — the payload is already in memory.
+- Storage: measured against the real service on a one-page table-bearing PDF, the raw
+  analysis was 8.8 KB against 9.6 KB for the text output — comparable, not a multiple, since
+  the typed projection re-states per-page words and lines the raw response holds once.
+  Blob cost either way, not latency: the payload is already in memory.
 - No API contract change. `POST /api/v1/contents` still returns `202` with the same body.
