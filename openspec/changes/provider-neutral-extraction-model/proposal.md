@@ -51,11 +51,12 @@ stages consume, so no consumer knows or cares which service produced it.
   form its header, computed by the adapter.
 - **The adapter renders, the consumer never parses — including for parts of a table.**
   A table carries `rendered` (its text exactly as it appears in `text`) and, so that a
-  consumer can emit *some rows* of it without knowing the markup: `render_prefix` (the
-  opening markup plus the header rows), `render_suffix` (the closing markup), and `rows`
-  (the body rows, each with its own rendering). Any subset renders as
-  `render_prefix + rows… + render_suffix`, which is a valid table in whatever form the
-  extractor produced. This is what makes HTML-vs-pipe-table a non-question — and it is
+  consumer can emit *some rows* of it without knowing the markup: `render_prefix` (exactly
+  the part of the rendering before the first body row), `render_suffix` (exactly the part
+  after the last), and `rows` (the body rows, each with its own rendering). A fragment is
+  `render_prefix` + the chosen rows + `render_suffix`, and is a valid table in whatever
+  form the extractor produced — including forms like Markdown pipe tables that cannot
+  express a table without a header line. This is what makes HTML-vs-pipe-table a non-question — and it is
   needed because cell spans do **not** delimit rendered rows: on a real Document
   Intelligence response, the min-to-max span of row 0's cells is `Budget Summary`, while
   the row's actual rendering is `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`. Slicing

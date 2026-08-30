@@ -56,9 +56,8 @@ between rows and repeating the table's header rows in every piece.
 #### Scenario: Pieces are composed, not sliced
 
 - **WHEN** a piece of a table is emitted
-- **THEN** its text is composed from the renderings the extractor supplied — the table's
-  opening rendering, the piece's rows, and the closing rendering — and the stage does not
-  cut the extracted text at positions derived from cell spans
+- **THEN** its text is the fragment the extraction contract defines for the rows it holds,
+  and the stage does not cut the extracted text at positions derived from cell spans
 
 #### Scenario: Rows joined by a merged cell stay together
 
@@ -72,10 +71,12 @@ between rows and repeating the table's header rows in every piece.
 - **THEN** that row is emitted whole in an oversized chunk rather than cut, and the
   condition is logged
 
-#### Scenario: A table with no header
+#### Scenario: A table with no header cells
 
 - **WHEN** a table that declares no header rows is split
-- **THEN** the pieces carry no header prefix and splitting still occurs on row boundaries
+- **THEN** every piece is still composed as a fragment, so it carries whatever the
+  extractor's rendering places before the first body row, and splitting still occurs on row
+  boundaries
 
 #### Scenario: A split table is one table, not a table and copies of it
 

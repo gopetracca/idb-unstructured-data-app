@@ -12,7 +12,7 @@
       a deprecated alias so a pre-change `text.json` still loads.
 - [ ] 1.3 Add to `ExtractedTable`: `header_rows: list[int]`, `rendered: str`,
       `render_prefix: str` (exactly the part of the rendering preceding the first body
-      row), `prefix_row_indices: list[int]` (the rows, if any, the prefix carries),
+      row), `prefix_row_indices: list[int]` (the rows, if any, it carries),
       `render_suffix: str`, and `rows: list[TableRow]` holding the remainder in document
       order.
 - [ ] 1.3a Add `TableRow`: `row_index`, `rendered`, `source_range: tuple[int, int] | None`,

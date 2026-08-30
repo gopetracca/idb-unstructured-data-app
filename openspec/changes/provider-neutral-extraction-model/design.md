@@ -48,10 +48,11 @@ because the chunker needed to know where a table started and ended in the text a
 only the rendering to go on. With spans and `rendered`, that question is answered by data.
 
 The prefix/suffix pair exists because a consumer emitting part of a table needs to produce
-a *valid* table, and validity is a property of the rendering. `render_prefix` is the
-opening markup plus the header rows; `render_suffix` closes it; `rows` holds the body rows
-individually. Any subset is then `render_prefix + those rows + render_suffix`, composed by
-concatenation and nothing else.
+a *valid* table, and validity is a property of the rendering. The spec states the
+composition once — a fragment is `render_prefix` + the chosen body rows + `render_suffix` —
+and everything else, here and in the dependent change, refers to that rather than
+restating what the prefix contains. Earlier drafts described it in five places and drifted
+into contradicting themselves twice; one definition and no paraphrases is the fix.
 
 For Document Intelligence, the adapter partitions the HTML it already has at `</tr>`
 boundaries: prefix is `<table>` plus the header `<tr>` elements, each body row is one

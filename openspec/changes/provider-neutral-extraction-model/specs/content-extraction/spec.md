@@ -67,46 +67,39 @@ are the same regardless of which service produced them.
 - **THEN** it is available as a string the extractor produced, in the same form it takes in
   `extracted_text`, so that no consumer parses the rendering to recover it
 
-#### Scenario: Part of a table can be rendered without knowing the markup
+#### Scenario: Fragment composition is defined once
 
-- **WHEN** a consumer needs to emit only some rows of a table
-- **THEN** the table provides an opening rendering, a closing rendering, and each body row's
-  own rendering, such that concatenating the opening, any selection of body rows, and the
-  closing yields a valid table in the extractor's form
+- **WHEN** a consumer needs some rows of a table
+- **THEN** the fragment for a selection of body rows is exactly
+  `render_prefix` + those rows' renderings in document order + `render_suffix`, and this
+  concatenation is the only operation a consumer performs to obtain it
 
-#### Scenario: The opening rendering is everything before the first body row
+#### Scenario: Every fragment is valid in the extractor's form
 
-- **WHEN** a table's renderings are produced
-- **THEN** the opening rendering is exactly the part of the table's rendering that precedes
-  its first body row — whatever that form requires there — and the body rows are the
-  remainder in document order
+- **WHEN** a fragment is composed for any selection of body rows
+- **THEN** it is a valid table in the form the extractor produced, because `render_prefix`
+  is exactly the part of the rendering that precedes the first body row — whatever that
+  form requires there — and `render_suffix` is exactly the part that follows the last
 
 #### Scenario: A form that requires a header line
 
 - **WHEN** the extractor renders tables in a form that cannot express a table without a
   header line, such as a Markdown pipe table with its delimiter row
-- **THEN** the opening rendering carries that line and its delimiter, so that every emitted
-  fragment is a valid table in that form, including for a table the provider marked as
-  having no header
+- **THEN** `render_prefix` carries that line and its delimiter, so fragments are valid in
+  that form, including for a table the provider marked as having no header — the prefix is
+  never empty for such a form
 
-#### Scenario: Rows carried in the opening rendering are identified
+#### Scenario: Rows carried in the prefix are identified
 
-- **WHEN** the opening rendering carries one or more of the table's rows
-- **THEN** the table records which rows those are, so a consumer knows which rows are
-  repeated in every fragment rather than inferring it from the rendering
+- **WHEN** `render_prefix` carries one or more of the table's rows
+- **THEN** the table records which rows those are, so a consumer knows which rows every
+  fragment repeats rather than inferring it from the rendering
 
-#### Scenario: A header row that is not a leading row
+#### Scenario: A header row that is not carried in the prefix
 
-- **WHEN** a table reports a header row that is not carried in the opening rendering
+- **WHEN** a table reports a header row that `render_prefix` does not carry
 - **THEN** it is still reported as a header row, and it remains an ordinary body row in
-  document order rather than being moved into the opening rendering
-
-#### Scenario: The parts reconstruct the whole exactly
-
-- **WHEN** a table's rendering is contiguous in `extracted_text`
-- **THEN** concatenating its opening rendering, all of its body rows in document order, and
-  its closing rendering equals its full rendering exactly — which holds for every table,
-  including one whose header rows are not its leading rows
+  document order rather than being moved into the prefix
 
 #### Scenario: Rows carry their own source range
 

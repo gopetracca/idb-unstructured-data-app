@@ -15,8 +15,11 @@ prose regions to the chunker, and handles table regions itself.
 
 - Every chunker adapter gains the behaviour, including `chunker_llamaindex`, which has
   none today.
-- The rule is testable without a chunker: given blocks and a chunk size, the partitioning
-  is a pure function.
+- The rule is testable without a chunker: given the extraction output — text, blocks and
+  tables — and a chunk size, the partitioning is a pure function. It needs the tables and
+  not only the blocks, because a fragment is composed from `render_prefix`, `rows` and
+  `render_suffix`, which live on the table; the block carries the reference that resolves
+  to it.
 - Adapters keep a single responsibility — splitting prose by their strategy.
 
 The alternative, teaching each adapter about tables, is what produced the current
@@ -31,10 +34,11 @@ When a table exceeds the chunk size:
    there produces fragments that are not tables. On a real Document Intelligence response
    the min-to-max span over row 0's cells is `Budget Summary`, where the row's rendering is
    `<tr>\n<th colspan="2">Budget Summary</th>\n</tr>`.
-2. Compose each piece as `render_prefix + its rows + render_suffix`. The prefix is
-   everything the extractor's rendering places before the first body row, so every piece is
-   a valid table in that form by concatenation alone — including for a form like a Markdown
-   pipe table, which cannot express a table without a header line and its delimiter.
+2. Compose each piece as the fragment the extraction contract defines for its rows. Every
+   piece is then a valid table in the extractor's form by concatenation alone — including
+   for a form like a Markdown pipe table, which cannot express a table without a header line
+   and its delimiter. This stage does not decide what a fragment contains; it decides which
+   rows go in which one.
 3. Never cut between a row and one marked as continuing from it, so a cell spanning several
    rows stays with the rows it covers.
 4. Record the row range each piece covers.

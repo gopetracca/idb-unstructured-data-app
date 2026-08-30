@@ -4,9 +4,12 @@
 
 ## 1. Partitioning
 
-- [ ] 1.1 Add a pure partitioner in `src/core/` that takes the block list, the extracted
-      text, and a chunk size, and returns regions marked prose or table — no chunker,
-      provider, or IO knowledge.
+- [ ] 1.1 Add a pure partitioner in `src/core/` that takes the extraction output — the
+      extracted text, the block list, **and the tables** — plus a chunk size, and returns
+      regions marked prose or table. It resolves a table block to its table through the
+      block's table reference, because composing a fragment needs `render_prefix`, `rows`
+      and `render_suffix`, none of which are on the block. No chunker, provider, or IO
+      knowledge.
 - [ ] 1.2 Table splitting: cut only between the body rows the extractor supplied — never
       at positions derived from cell spans — and never between a row and one marked as
       continuing from it. Compose each piece as `render_prefix + rows + render_suffix`.
@@ -49,9 +52,11 @@
 
 ## 5. Tests
 
-- [ ] 5.1 Partitioner unit tests: table within size stays whole; oversized table splits on
-      row boundaries; every piece carries the header; a single oversized row is emitted
-      whole; a table with no header splits without a prefix.
+- [ ] 5.1 Partitioner unit tests: a table within size stays whole; an oversized table splits
+      on row boundaries; every fragment is `render_prefix` + its rows + `render_suffix`; a
+      single oversized row group is emitted whole. Note that *every* fragment carries the
+      prefix, including for a table with no header cells — the prefix is what the rendering
+      puts before the first body row, not a header, and for some forms it is never empty.
 - [ ] 5.2 The same document rendered as HTML and as pipe tables produces identical chunk
       boundaries and metadata — the provider-independence claim, as a test.
 - [ ] 5.3 `chunk_document` tests: on both the block-list path and the fallback path, every
