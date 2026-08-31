@@ -16,7 +16,7 @@ one's vocabulary leaking into it.
 | Table shape | `rowCount`/`columnCount`, `cells[]` | `TableData.num_rows`/`num_cols`, `table_cells[]` | `row_count`/`column_count`, `cells[]` |
 | Cell position | `rowIndex`, `columnIndex`, `rowSpan`, `columnSpan` | `start_row_offset_idx`, `end_row_offset_idx`, `start_col_offset_idx`, `end_col_offset_idx`, `row_span`, `col_span` | `row_index`, `column_index`, `row_span`, `column_span` |
 | Header cells | `kind: columnHeader \| rowHeader \| stubHead` | `column_header: bool`, `row_header: bool`, `row_section: bool` | `role: CellRole` |
-| Geometry | `boundingRegions[].polygon`, 8 floats, inches, top-left origin | `prov[].bbox` (`l`,`t`,`r`,`b`) with `CoordOrigin`, points | `bbox` + `unit` + `origin`, `polygon` kept when given |
+| Geometry | `boundingRegions[].polygon`, 8 floats, top-left origin, in the page's own unit — inch for PDF/Office, **pixel for images** | `prov[].bbox` (`l`,`t`,`r`,`b`) with `CoordOrigin`, points | `bbox` + `unit` + `origin`, `polygon` kept when given |
 | Page | `boundingRegions[].pageNumber` | `prov[].page_no` | `page_number` |
 | Cross-references | `elements: ["/paragraphs/2"]` | `$ref: "#/texts/2"` | `elements: list[str]`, opaque |
 
@@ -130,9 +130,12 @@ before its rows.
 
 ## Decision: units are recorded, never normalised
 
-Document Intelligence reports inches; Docling reports points. Converting in the adapter
-would mean the canonical model carries a number whose meaning depends on a conversion no
-consumer can see. The canonical `BoundingBox` therefore carries `unit` (`inch`, `point`,
+Document Intelligence reports whatever unit the page declares — inches for a PDF, pixels
+for an image — and Docling reports points. Converting in the adapter would mean the
+canonical model carries a number whose meaning depends on a conversion no consumer can see.
+Nor can the unit be decided once per provider: it varies within Document Intelligence by
+input format, and an adapter that hard-codes one publishes a scanned page's pixels as
+inches, which is wrong by three orders of magnitude and looks entirely plausible. The canonical `BoundingBox` therefore carries `unit` (`inch`, `point`,
 `pixel`) and `origin` (`top_left`, `bottom_left`) alongside the coordinates, and any
 consumer comparing geometry across documents is responsible for checking them. Downstream
 code today uses page numbers, not geometry, so this costs nothing now and prevents a

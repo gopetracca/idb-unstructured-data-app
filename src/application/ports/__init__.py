@@ -3,10 +3,13 @@
 from src.application.ports.blob_client import BlobClientPort
 from src.application.ports.blob_store import BlobStorePort
 from src.application.ports.chunk_index_store import ChunkIndexStorePort
-from src.application.ports.document_intelligence import DocumentIntelligencePort
-from src.application.ports.embedding import EmbeddingPort, EmbeddingResult
+from src.application.ports.document_extractor import (
+    DocumentExtractorPort,
+    DocumentIntelligencePort,
+)
 from src.application.ports.document_query import DocumentQueryPort
 from src.application.ports.document_store import DocumentStorePort
+from src.application.ports.embedding import EmbeddingPort, EmbeddingResult
 from src.application.ports.pipeline_store import PipelineStorePort
 from src.application.ports.processing_events import ProcessingEventsPort
 from src.application.ports.queue_publisher import QueuePublisherPort
@@ -16,6 +19,8 @@ __all__ = [
     "BlobClientPort",
     "BlobStorePort",
     "ChunkIndexStorePort",
+    "DocumentExtractorPort",
+    # Deprecated alias for DocumentExtractorPort; kept so callers do not break.
     "DocumentIntelligencePort",
     "EmbeddingPort",
     "EmbeddingResult",

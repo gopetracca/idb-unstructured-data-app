@@ -34,7 +34,7 @@ class ProcessTextAndEnqueueChunkingUseCase:
         Initialize the use case.
 
         Args:
-            process_use_case: Use case for Document Intelligence extraction
+            process_use_case: Use case for the extraction stage
             queue_publisher: Queue publisher port implementation
             queue_name: Target chunking queue name
             pipeline_store: Repository for pipeline state lookups

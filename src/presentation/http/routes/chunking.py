@@ -60,7 +60,7 @@ router = APIRouter(prefix="/api/v1/chunks", tags=["chunks"])
     description="""
     Chunk a document's extracted text into smaller segments for vectorization.
 
-    The document must have been previously processed by Document Intelligence,
+    The document must have been previously processed by the extraction stage,
     with the extracted text stored in the source container (default: 'text').
     The resulting chunks will be stored in the output container (default: 'chunks').
 

@@ -13,9 +13,34 @@ import pytest
 from azure.ai.documentintelligence.models import AnalyzeResult
 
 from src.config.settings import DocumentIntelligenceSettings
+from src.core.entities.document_analysis import (
+    BlockKind,
+    CellRole,
+    CoordinateOrigin,
+    CoordinateUnit,
+    MarkdownOutput,
+)
 from src.core.errors import DocumentProcessingError, UnsupportedFormatError
 from src.infrastructure.azure.adapters.document_intelligence_azure import (
     AzureDocumentIntelligenceAdapter,
+)
+from tests.support.document_intelligence_payloads import (
+    DOCUMENT_MARKDOWN,
+    FIGURE_HTML,
+    SIMPLE_PAYLOAD,
+    TABLE_HTML,
+    TABLE_PAYLOAD,
+    analyze_result,
+)
+from tests.support.extractor_contract import (
+    assert_blocks_are_ordered_and_disjoint,
+    assert_blocks_resolve,
+    assert_every_row_subset_is_a_valid_table,
+    assert_header_rows_match_the_cells,
+    assert_prefix_rows_are_disjoint_from_body_rows,
+    assert_rendering_is_exact,
+    assert_rows_carry_their_provenance,
+    assert_table_blocks_resolve_to_a_table,
 )
 from tests.support.table_reconstruction import assert_cells_tile_grid, assert_spans_resolve
 
@@ -31,113 +56,6 @@ def mock_document_intelligence_settings() -> DocumentIntelligenceSettings:
         api_version="2024-11-30",
         use_fake=False,
     )
-
-
-def analyze_result(**overrides) -> AnalyzeResult:
-    """Build an AnalyzeResult from a service-shaped payload."""
-    payload = {"apiVersion": "2024-11-30", "modelId": "prebuilt-layout"}
-    payload.update(overrides)
-    return AnalyzeResult(payload)
-
-
-# A document with one page and two words — the minimum the older tests asserted on.
-SIMPLE_PAYLOAD = {
-    "content": "# Hello World\n\nThis is extracted content.",
-    "pages": [
-        {
-            "pageNumber": 1,
-            "words": [
-                {"content": "Hello", "confidence": 0.95, "span": {"offset": 2, "length": 5}},
-                {"content": "World", "confidence": 0.98, "span": {"offset": 8, "length": 5}},
-            ],
-        }
-    ],
-}
-
-# A table-bearing document: a merged title cell over a header row over one data row.
-# Rendered markdown plus structure, the way the layout model returns both.
-TABLE_MARKDOWN = (
-    "| Budget Summary ||\n| --- | --- |\n| Year | Amount |\n| 2026 | 1,250 |"
-)
-
-TABLE_PAYLOAD = {
-    "content": TABLE_MARKDOWN,
-    "contentFormat": "markdown",
-    "pages": [
-        {
-            "pageNumber": 1,
-            "width": 8.5,
-            "height": 11.0,
-            "unit": "inch",
-            "angle": 0.3,
-            "spans": [{"offset": 0, "length": len(TABLE_MARKDOWN)}],
-            "words": [
-                {"content": "Budget", "confidence": 0.99, "span": {"offset": 2, "length": 6}},
-                {"content": "Summary", "confidence": 0.97, "span": {"offset": 9, "length": 7}},
-            ],
-            "lines": [
-                {
-                    "content": "| Budget Summary ||",
-                    "spans": [{"offset": 0, "length": 19}],
-                    "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4],
-                },
-                {"content": "| Year | Amount |", "spans": [{"offset": 33, "length": 17}]},
-            ],
-            "selectionMarks": [
-                {"state": "selected", "confidence": 0.88, "spans": [{"offset": 0, "length": 1}]}
-            ],
-        }
-    ],
-    "tables": [
-        {
-            "rowCount": 3,
-            "columnCount": 2,
-            "cells": [
-                {
-                    "rowIndex": 0,
-                    "columnIndex": 0,
-                    "columnSpan": 2,
-                    "kind": "columnHeader",
-                    "content": "Budget Summary",
-                    "elements": ["/paragraphs/2"],
-                    "spans": [{"offset": 2, "length": 14}],
-                    "boundingRegions": [
-                        {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}
-                    ],
-                },
-                {"rowIndex": 1, "columnIndex": 0, "kind": "columnHeader", "content": "Year"},
-                {"rowIndex": 1, "columnIndex": 1, "kind": "columnHeader", "content": "Amount"},
-                {"rowIndex": 2, "columnIndex": 0, "content": "2026"},
-                {"rowIndex": 2, "columnIndex": 1, "content": "1,250"},
-            ],
-            "caption": {"content": "Table 1. Budget by year"},
-            "footnotes": [{"content": "Amounts in thousands."}],
-            "spans": [{"offset": 0, "length": len(TABLE_MARKDOWN)}],
-            "boundingRegions": [{"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 3.0, 1.0, 3.0]}],
-        }
-    ],
-    "paragraphs": [
-        {"content": "Budget Summary", "role": "title", "spans": [{"offset": 2, "length": 14}]},
-        {"content": "page 1", "role": "pageFooter", "spans": [{"offset": 0, "length": 6}]},
-    ],
-    "figures": [
-        {
-            "id": "1.1",
-            "caption": {"content": "Figure 1. Spend over time"},
-            "elements": ["/paragraphs/0"],
-            "boundingRegions": [{"pageNumber": 1, "polygon": [2.0, 4.0, 6.0, 4.0, 6.0, 6.0, 2.0, 6.0]}],
-        }
-    ],
-    "sections": [{"elements": ["/paragraphs/0", "/tables/0"]}],
-    "styles": [{"isHandwritten": False, "confidence": 0.9, "fontWeight": "bold"}],
-    "keyValuePairs": [
-        {
-            "key": {"content": "Fiscal year", "spans": [{"offset": 0, "length": 11}]},
-            "value": {"content": "2026"},
-            "confidence": 0.82,
-        }
-    ],
-}
 
 
 @pytest.fixture
@@ -449,8 +367,8 @@ class TestStructuralPreservation:
         assert merged.column_span == 2
         # The service omits a span of 1 rather than sending it; it must not become 0.
         assert merged.row_span == 1
-        assert merged.kind == "columnHeader"
-        assert merged.spans[0].offset == 2
+        assert merged.role == CellRole.COLUMN_HEADER
+        assert merged.spans[0].offset == DOCUMENT_MARKDOWN.index("Budget Summary")
         assert merged.spans[0].length == 14
         assert merged.bounding_regions[0].page_number == 1
         assert len(merged.bounding_regions[0].polygon) == 8
@@ -479,6 +397,9 @@ class TestStructuralPreservation:
         assert_spans_resolve(table, result.extracted_text)
         span = table.cells[0].spans[0]
         assert result.extracted_text[span.offset : span.offset + span.length] == "Budget Summary"
+        # The cell's span stops at its content: the `<th>` around it is outside, which is
+        # exactly why a row cannot be cut at cell spans.
+        assert "<th" not in result.extracted_text[span.offset : span.offset + span.length]
 
     async def test_table_caption_footnotes_and_pages(self, output, sample_file_id):
         result = await self._analyze(output, sample_file_id)
@@ -491,9 +412,9 @@ class TestStructuralPreservation:
     async def test_paragraph_roles_are_preserved(self, output, sample_file_id):
         result = await self._analyze(output, sample_file_id)
 
-        assert [p.role for p in result.paragraphs] == ["title", "pageFooter"]
-        assert result.paragraphs[0].content == "Budget Summary"
-        assert result.paragraphs[0].spans[0].offset == 2
+        assert [p.role for p in result.paragraphs[:3]] == ["title", None, "pageFooter"]
+        assert result.paragraphs[0].content == "Quarterly Report"
+        assert result.paragraphs[0].spans[0].offset == 0
 
     async def test_figures_are_preserved(self, output, sample_file_id):
         result = await self._analyze(output, sample_file_id)
@@ -502,7 +423,7 @@ class TestStructuralPreservation:
         figure = result.figures[0]
         assert figure.figure_id == "1.1"
         assert figure.caption == "Figure 1. Spend over time"
-        assert figure.elements == ["/paragraphs/0"]
+        assert figure.elements == ["/paragraphs/8"]
         assert figure.bounding_regions[0].page_number == 1
 
     async def test_sections_styles_and_key_value_pairs_are_preserved(
@@ -525,15 +446,15 @@ class TestStructuralPreservation:
 
         assert (page.width, page.height, page.unit) == (8.5, 11.0, "inch")
         assert page.angle == 0.3
-        assert page.spans[0].length == len(TABLE_MARKDOWN)
+        assert page.spans[0].length == len(DOCUMENT_MARKDOWN)
         # Lines keep the line breaks that the space-joined `page.text` destroys.
         assert [line.content for line in page.lines] == [
-            "| Budget Summary ||",
-            "| Year | Amount |",
+            "Quarterly Report",
+            "Budget Summary",
         ]
         assert len(page.lines[0].polygon) == 8
         assert [w.content for w in page.words] == ["Budget", "Summary"]
-        assert page.words[0].span.offset == 2
+        assert page.words[0].span.offset == DOCUMENT_MARKDOWN.index("Budget")
         assert page.selection_marks[0].state == "selected"
 
     async def test_content_format_and_model_are_preserved(self, output, sample_file_id):
@@ -547,7 +468,7 @@ class TestStructuralPreservation:
 
         assert result.extraction_metadata.table_count == 1
         assert result.extraction_metadata.figure_count == 1
-        assert result.extraction_metadata.paragraph_count == 2
+        assert result.extraction_metadata.paragraph_count == 9
         # The adapter does not persist anything; whoever writes the sidecar flips this.
         assert result.extraction_metadata.raw_analysis_stored is False
 
@@ -596,3 +517,552 @@ class TestStructuralPreservation:
         assert result.paragraphs == []
         assert result.key_value_pairs == []
         assert result.extraction_metadata.table_count == 0
+
+
+# ---------------------------------------------------------------------------------------
+# Table shapes the main fixture cannot show, each one a case where a plausible
+# implementation gets the partition wrong.
+# ---------------------------------------------------------------------------------------
+
+# A merged cell spanning two rows, and a cell the service reports with no span at all
+# because it is empty. Neither row has a derivable extent from its cells.
+MERGED_TABLE_HTML = (
+    "<table>\n"
+    "<tr>\n<th>Region</th>\n<th>Amount</th>\n</tr>\n"
+    '<tr>\n<td rowSpan="2">North</td>\n<td>10</td>\n</tr>\n'
+    "<tr>\n<td></td>\n</tr>\n"
+    "</table>"
+)
+
+# The service marked row 1 as the header. Row 0 is ordinary data that happens to come
+# first — hoisting row 1 above it would reorder the document.
+LATE_HEADER_TABLE_HTML = (
+    "<table>\n"
+    "<tr>\n<td>Draft</td>\n<td>2026-01-01</td>\n</tr>\n"
+    "<tr>\n<th>Year</th>\n<th>Amount</th>\n</tr>\n"
+    "<tr>\n<td>2026</td>\n<td>1,250</td>\n</tr>\n"
+    "</table>"
+)
+
+
+def table_only_payload(rendered: str, cells: list[dict], row_count: int) -> dict:
+    """A one-table document whose markdown is exactly that table's rendering."""
+    return {
+        "content": rendered,
+        "contentFormat": "markdown",
+        "pages": [{"pageNumber": 1}],
+        "tables": [
+            {
+                "rowCount": row_count,
+                "columnCount": 2,
+                "cells": cells,
+                "spans": [{"offset": 0, "length": len(rendered)}],
+                "boundingRegions": [
+                    {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 3.0, 1.0, 3.0]}
+                ],
+            }
+        ],
+    }
+
+
+MERGED_PAYLOAD = table_only_payload(
+    MERGED_TABLE_HTML,
+    [
+        {"rowIndex": 0, "columnIndex": 0, "kind": "columnHeader", "content": "Region"},
+        {"rowIndex": 0, "columnIndex": 1, "kind": "columnHeader", "content": "Amount"},
+        {"rowIndex": 1, "columnIndex": 0, "rowSpan": 2, "content": "North"},
+        {"rowIndex": 1, "columnIndex": 1, "content": "10"},
+        # An empty cell: the service sends no span for it, so nothing about this row's
+        # extent can be derived from its cells.
+        {"rowIndex": 2, "columnIndex": 1, "content": ""},
+    ],
+    row_count=3,
+)
+
+LATE_HEADER_PAYLOAD = table_only_payload(
+    LATE_HEADER_TABLE_HTML,
+    [
+        {"rowIndex": 0, "columnIndex": 0, "content": "Draft"},
+        {"rowIndex": 0, "columnIndex": 1, "content": "2026-01-01"},
+        {"rowIndex": 1, "columnIndex": 0, "kind": "columnHeader", "content": "Year"},
+        {"rowIndex": 1, "columnIndex": 1, "kind": "columnHeader", "content": "Amount"},
+        {"rowIndex": 2, "columnIndex": 0, "content": "2026"},
+        {"rowIndex": 2, "columnIndex": 1, "content": "1,250"},
+    ],
+    row_count=3,
+)
+
+
+async def analyse(settings, payload: dict) -> MarkdownOutput:
+    """Map a service-shaped payload through the adapter."""
+    adapter = adapter_for(settings, analyze_result(**payload))
+    return await adapter.analyze_document(
+        document_content=b"%PDF-1.4",
+        content_type="application/pdf",
+        file_id="canonical-model-test",
+    )
+
+
+class TestCanonicalBlocks:
+    """The block list is the contract's front door: everything else hangs off it."""
+
+    @pytest.fixture
+    async def output(self, mock_document_intelligence_settings):
+        return await analyse(mock_document_intelligence_settings, TABLE_PAYLOAD)
+
+    async def test_blocks_are_in_reading_order(self, output):
+        """Span order is reading order — the service reports where it put each element."""
+        assert [block.kind for block in output.blocks] == [
+            BlockKind.HEADING,
+            BlockKind.PARAGRAPH,
+            BlockKind.TABLE,
+            BlockKind.FIGURE,
+            BlockKind.PARAGRAPH,
+        ]
+        assert [block.start for block in output.blocks] == sorted(
+            block.start for block in output.blocks
+        )
+
+    async def test_every_block_resolves_against_the_extracted_text(self, output):
+        """The offset invariant, stated as the text each block actually yields."""
+        assert_blocks_resolve(output)
+        text = output.extracted_text
+
+        assert output.blocks[0].text_in(text) == "# Quarterly Report"
+        assert output.blocks[2].text_in(text) == TABLE_HTML
+        assert output.blocks[3].text_in(text) == FIGURE_HTML
+
+    async def test_the_service_role_survives_the_narrowing_to_a_kind(self, output):
+        """`title` and `sectionHeading` both become headings; the role says which."""
+        assert output.blocks[0].role == "title"
+        assert output.blocks[-1].kind is BlockKind.PARAGRAPH
+        assert output.blocks[-1].role == "pageFooter"
+
+    async def test_cell_paragraphs_are_not_repeated_as_blocks(self, output):
+        """The service reports a paragraph per table cell; the block list must not.
+
+        Emitting both would overlap the table's own range, and "the blocks in order" would
+        describe two different documents.
+        """
+        assert_blocks_are_ordered_and_disjoint(output)
+        assert len(output.paragraphs) == 9
+        assert sum(1 for block in output.blocks if block.kind is BlockKind.PARAGRAPH) == 2
+
+    async def test_a_table_block_names_its_table(self, output):
+        """Without this a consumer sees a table and cannot reach the renderings."""
+        table_block = next(b for b in output.blocks if b.kind is BlockKind.TABLE)
+
+        assert table_block.table_index == 0
+        assert output.tables[table_block.table_index].rendered == TABLE_HTML
+        assert_table_blocks_resolve_to_a_table(output)
+
+    async def test_blocks_carry_page_numbers_and_geometry(self, output):
+        block = output.blocks[0]
+
+        assert block.page_number == 1
+        assert block.bounding_box is not None
+        assert (block.bounding_box.left, block.bounding_box.top) == (1.0, 1.0)
+        assert (block.bounding_box.right, block.bounding_box.bottom) == (7.5, 1.4)
+        assert block.bounding_box.polygon == [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]
+
+    async def test_geometry_declares_its_unit_and_origin(self, output):
+        """Document Intelligence reports inches from the top left; the box says so."""
+        box = output.blocks[0].bounding_box
+
+        assert box.unit is CoordinateUnit.INCH
+        assert box.origin is CoordinateOrigin.TOP_LEFT
+
+    async def test_geometry_on_an_image_document_is_reported_in_pixels(
+        self, mock_document_intelligence_settings
+    ):
+        """An image page is measured in pixels, and the box has to say so.
+
+        PNG, JPEG, TIFF and BMP are all supported inputs, and for every one of them the
+        service reports page geometry in pixels rather than inches. Labelling those
+        coordinates `inch` would be the exact silent mis-comparison that putting `unit` on
+        the box exists to prevent — and no consumer could tell.
+        """
+        markdown = "Scanned heading"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [
+                    {
+                        "pageNumber": 1,
+                        "width": 1700.0,
+                        "height": 2200.0,
+                        "unit": "pixel",
+                        "angle": 0.0,
+                    }
+                ],
+                "paragraphs": [
+                    {
+                        "content": markdown,
+                        "role": "title",
+                        "spans": [{"offset": 0, "length": len(markdown)}],
+                        "boundingRegions": [
+                            {
+                                "pageNumber": 1,
+                                "polygon": [120.0, 90.0, 1580.0, 90.0, 1580.0, 210.0, 120.0, 210.0],
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        box = output.blocks[0].bounding_box
+
+        assert output.pages[0].unit == "pixel"
+        assert box is not None
+        assert box.unit is CoordinateUnit.PIXEL
+        assert box.origin is CoordinateOrigin.TOP_LEFT
+        assert (box.left, box.top, box.right, box.bottom) == (120.0, 90.0, 1580.0, 210.0)
+
+    async def test_the_unit_is_read_per_page_not_decided_once(
+        self, mock_document_intelligence_settings
+    ):
+        """The service reports the unit per page, so the adapter reads it per page."""
+        markdown = "Page one\n\nPage two"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [
+                    {"pageNumber": 1, "unit": "inch", "width": 8.5, "height": 11.0},
+                    {"pageNumber": 2, "unit": "pixel", "width": 1700.0, "height": 2200.0},
+                ],
+                "paragraphs": [
+                    {
+                        "content": "Page one",
+                        "spans": [{"offset": 0, "length": 8}],
+                        "boundingRegions": [
+                            {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}
+                        ],
+                    },
+                    {
+                        "content": "Page two",
+                        "spans": [{"offset": 10, "length": 8}],
+                        "boundingRegions": [
+                            {
+                                "pageNumber": 2,
+                                "polygon": [10.0, 10.0, 900.0, 10.0, 900.0, 80.0, 10.0, 80.0],
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+
+        assert [block.bounding_box.unit for block in output.blocks] == [
+            CoordinateUnit.INCH,
+            CoordinateUnit.PIXEL,
+        ]
+        assert [block.page_number for block in output.blocks] == [1, 2]
+
+    @pytest.mark.parametrize("page", [{"pageNumber": 1}, {"pageNumber": 1, "unit": "furlong"}])
+    async def test_a_unit_the_model_cannot_name_yields_no_box(
+        self, mock_document_intelligence_settings, page
+    ):
+        """A guessed unit is worse than no geometry, because nothing marks it as guessed.
+
+        The block itself survives — its range and page are still true — so a consumer
+        loses the rectangle, not the element.
+        """
+        markdown = "Heading"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [page],
+                "paragraphs": [
+                    {
+                        "content": markdown,
+                        "role": "title",
+                        "spans": [{"offset": 0, "length": 7}],
+                        "boundingRegions": [
+                            {"pageNumber": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}
+                        ],
+                    }
+                ],
+            },
+        )
+
+        assert output.blocks[0].bounding_box is None
+        assert output.blocks[0].text_in(output.extracted_text) == "Heading"
+        assert output.blocks[0].page_number == 1
+
+    async def test_provider_references_are_preserved_verbatim(self, output):
+        """`/paragraphs/8` is opaque: kept exactly, interpreted by nobody."""
+        figure_block = next(b for b in output.blocks if b.kind is BlockKind.FIGURE)
+
+        assert figure_block.elements == ["/paragraphs/8"]
+        assert output.tables[0].cells[0].elements == ["/paragraphs/2"]
+
+    async def test_a_figure_that_encloses_a_table_does_not_overlap_it(
+        self, mock_document_intelligence_settings
+    ):
+        """Two blocks over the same characters would make reading order ambiguous.
+
+        The table wins, because it is the element a consumer can do something with.
+        """
+        table_html = "<table>\n<tr>\n<td>a</td>\n</tr>\n</table>"
+        markdown = f"<figure>\n{table_html}\n</figure>"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [{"pageNumber": 1}],
+                "tables": [
+                    {
+                        "rowCount": 1,
+                        "columnCount": 1,
+                        "cells": [{"rowIndex": 0, "columnIndex": 0, "content": "a"}],
+                        "spans": [{"offset": markdown.index(table_html), "length": len(table_html)}],
+                    }
+                ],
+                "figures": [
+                    {"id": "1.1", "spans": [{"offset": 0, "length": len(markdown)}]}
+                ],
+            },
+        )
+
+        assert [block.kind for block in output.blocks] == [BlockKind.TABLE]
+        assert_blocks_are_ordered_and_disjoint(output)
+
+    async def test_overlapping_paragraphs_cannot_reach_the_block_list(
+        self, mock_document_intelligence_settings
+    ):
+        """The invariant holds for shapes the service is not expected to produce.
+
+        Downstream code relies on walking the blocks and seeing each character once. A
+        response that overlaps its own paragraphs must not turn that into a silent
+        duplication.
+        """
+        markdown = "Alpha beta gamma"
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {
+                "content": markdown,
+                "pages": [{"pageNumber": 1}],
+                "paragraphs": [
+                    {"content": "Alpha beta", "spans": [{"offset": 0, "length": 10}]},
+                    {"content": "beta gamma", "spans": [{"offset": 6, "length": 10}]},
+                ],
+            },
+        )
+
+        assert_blocks_are_ordered_and_disjoint(output)
+        assert [block.text_in(output.extracted_text) for block in output.blocks] == ["Alpha beta"]
+
+    async def test_output_written_before_blocks_existed_has_none(
+        self, mock_document_intelligence_settings
+    ):
+        """Nothing invents structure for a response that reports none."""
+        output = await analyse(
+            mock_document_intelligence_settings,
+            {"content": "Plain text", "pages": []},
+        )
+
+        assert output.blocks == []
+
+
+class TestCanonicalTableRendering:
+    """The adapter renders; nothing downstream parses."""
+
+    @pytest.fixture
+    async def table(self, mock_document_intelligence_settings):
+        output = await analyse(mock_document_intelligence_settings, TABLE_PAYLOAD)
+        return output.tables[0], output.extracted_text
+
+    async def test_rendered_is_the_text_at_the_tables_span(self, table):
+        extracted, text = table
+        span = extracted.spans[0]
+
+        assert extracted.rendered == text[span.offset : span.offset + span.length]
+        assert extracted.rendered == TABLE_HTML
+
+    async def test_header_rows_are_derived_from_cell_roles(self, table):
+        extracted, _ = table
+
+        assert extracted.header_rows == [0, 1]
+        assert_header_rows_match_the_cells(extracted)
+
+    async def test_the_prefix_carries_the_leading_header_rows(self, table):
+        extracted, _ = table
+
+        assert extracted.prefix_row_indices == [0, 1]
+        assert extracted.render_prefix.startswith("<table>")
+        assert "Budget Summary" in extracted.render_prefix
+        assert "Amount" in extracted.render_prefix
+
+    async def test_the_suffix_is_what_follows_the_last_row(self, table):
+        extracted, _ = table
+
+        assert extracted.render_suffix == "\n</table>"
+
+    async def test_the_fragment_for_every_body_row_is_the_whole_table(self, table):
+        """The exactness rule — byte for byte, not merely equivalent."""
+        extracted, text = table
+
+        assert extracted.fragment() == extracted.rendered
+        assert_rendering_is_exact(extracted, text)
+
+    async def test_rows_the_prefix_carries_are_not_body_rows(self, table):
+        """Counting them twice would make the fragment longer than the table."""
+        extracted, _ = table
+
+        assert [row.row_index for row in extracted.rows] == [2]
+        assert_prefix_rows_are_disjoint_from_body_rows(extracted)
+
+    async def test_each_body_row_records_where_it_sits_in_the_text(self, table):
+        extracted, text = table
+        row = extracted.rows[0]
+
+        assert row.source_range is not None
+        start, end = row.source_range
+        assert text[start:end] == row.rendered
+        assert_rows_carry_their_provenance(extracted, text)
+
+    async def test_a_row_is_more_than_its_cells_spans(self, table):
+        """The reason rows exist: cell spans cover content, not the markup around it."""
+        extracted, text = table
+        cell_spans = [c.spans[0] for c in extracted.cells if c.row_index == 2 and c.spans]
+        lowest = min(span.offset for span in cell_spans)
+        highest = max(span.offset + span.length for span in cell_spans)
+
+        assert text[lowest:highest] == "2026</td>\n<td>1,250"
+        assert extracted.rows[0].rendered == "<tr>\n<td>2026</td>\n<td>1,250</td>\n</tr>"
+
+    async def test_any_selection_of_rows_is_a_valid_table(self, table):
+        extracted, _ = table
+
+        assert_every_row_subset_is_a_valid_table(extracted)
+
+
+class TestTablesTheMainFixtureCannotShow:
+    """Shapes where a plausible partition is silently wrong."""
+
+    @pytest.fixture
+    async def merged(self, mock_document_intelligence_settings):
+        return await analyse(mock_document_intelligence_settings, MERGED_PAYLOAD)
+
+    @pytest.fixture
+    async def late_header(self, mock_document_intelligence_settings):
+        return await analyse(mock_document_intelligence_settings, LATE_HEADER_PAYLOAD)
+
+    async def test_an_empty_cell_does_not_cost_its_row_a_rendering(self, merged):
+        """The service sends no span for an empty cell, so the row has no cell extent."""
+        table = merged.tables[0]
+        empty = next(cell for cell in table.cells if cell.content == "")
+
+        assert empty.spans == []
+        assert table.rows[-1].rendered == "<tr>\n<td></td>\n</tr>"
+        assert table.rows[-1].source_range is not None
+
+    async def test_rows_still_partition_the_rendering(self, merged):
+        table = merged.tables[0]
+
+        assert table.fragment() == table.rendered
+        assert [row.row_index for row in table.rows] == [1, 2]
+
+    async def test_a_vertically_merged_cell_marks_the_rows_it_covers(self, merged):
+        """Row 2's content is rendered in row 1; separating them would lose it."""
+        table = merged.tables[0]
+
+        assert table.rows[0].continues_from_row is None
+        assert table.rows[1].continues_from_row == 1
+
+    async def test_a_header_row_that_is_not_the_first_row(self, late_header):
+        """`header_rows` reports what the service marked, not what convention expects."""
+        table = late_header.tables[0]
+
+        assert table.header_rows == [1]
+
+    async def test_the_prefix_does_not_carry_a_late_header_row(self, late_header):
+        """Hoisting it would reorder the document and break the exactness rule."""
+        table = late_header.tables[0]
+
+        assert table.prefix_row_indices == []
+        assert table.render_prefix == "<table>\n"
+
+    async def test_a_late_header_row_stays_a_body_row_in_document_order(self, late_header):
+        table = late_header.tables[0]
+
+        assert [row.row_index for row in table.rows] == [0, 1, 2]
+        assert "Year" in table.rows[1].rendered
+
+    async def test_the_exactness_rule_still_holds(self, late_header):
+        table = late_header.tables[0]
+
+        assert table.fragment() == table.rendered == LATE_HEADER_TABLE_HTML
+        assert_every_row_subset_is_a_valid_table(table)
+
+
+class TestEveryCanonicalFieldHasAProducer:
+    """A field nothing sets is indistinguishable from one the provider does not supply.
+
+    This walks the canonical types rather than listing their fields, so a field added
+    later without a producer fails here instead of shipping empty.
+    """
+
+    @staticmethod
+    def _is_populated(value) -> bool:
+        """Whether an adapter actually set this. Zero counts; empty and absent do not."""
+        if value is None:
+            return False
+        if isinstance(value, (str, list, dict, tuple)) and len(value) == 0:
+            return False
+        return True
+
+    def _assert_all_fields_populated(self, instances, label: str) -> None:
+        assert instances, f"no {label} to check"
+        declared = set(type(instances[0]).model_fields)
+        populated = {
+            name
+            for instance in instances
+            for name in declared
+            if self._is_populated(getattr(instance, name))
+        }
+
+        assert declared == populated, f"{label} fields nothing populates: {declared - populated}"
+
+    @pytest.fixture
+    async def outputs(self, mock_document_intelligence_settings):
+        return [
+            await analyse(mock_document_intelligence_settings, payload)
+            for payload in (TABLE_PAYLOAD, MERGED_PAYLOAD, LATE_HEADER_PAYLOAD)
+        ]
+
+    async def test_every_content_block_field_is_populated(self, outputs):
+        self._assert_all_fields_populated(
+            [block for output in outputs for block in output.blocks], "ContentBlock"
+        )
+
+    async def test_every_bounding_box_field_is_populated(self, outputs):
+        self._assert_all_fields_populated(
+            [
+                block.bounding_box
+                for output in outputs
+                for block in output.blocks
+                if block.bounding_box
+            ],
+            "BoundingBox",
+        )
+
+    async def test_every_table_row_field_is_populated(self, outputs):
+        self._assert_all_fields_populated(
+            [row for output in outputs for table in output.tables for row in table.rows],
+            "TableRow",
+        )
+
+    async def test_every_table_field_is_populated(self, outputs):
+        self._assert_all_fields_populated(
+            [table for output in outputs for table in output.tables], "ExtractedTable"
+        )
+
+    async def test_every_table_cell_field_is_populated(self, outputs):
+        self._assert_all_fields_populated(
+            [cell for output in outputs for table in output.tables for cell in table.cells],
+            "TableCell",
+        )

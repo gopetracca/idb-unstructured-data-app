@@ -1003,21 +1003,21 @@ It also means two overlapping extractions cannot interleave into a mixed result:
 commits last wins both columns together, so the row never names one run's text beside
 another run's analysis.
 
-`text.json` carries the markdown *and* the document's structure. Fields are additive: the
-original `extracted_text`, `pages[].text`, `pages[].word_count` and `extraction_metadata`
-keep their meaning, so consumers written against the earlier shape (the chunker reads
-`extracted_text` only) are unaffected.
+`text.json` carries the markdown *and* the document's structure, in a form that names no
+extraction service. Fields are additive: the original `extracted_text`, `pages[].text`,
+`pages[].word_count` and `extraction_metadata` keep their meaning, so consumers written
+against the earlier shape (the chunker reads `extracted_text` only) are unaffected.
 
 ```jsonc
 {
   "file_id": "550e8400-...",
-  "extracted_text": "# Quarterly Report\n\n| Budget Summary ||\n...",  // markdown
+  "extracted_text": "# Quarterly Report\n\n<table>\n<tr>\n<th colspan=\"2\">...",  // markdown
   "content_format": "markdown",
   "model_id": "prebuilt-layout",
   "pages": [
     {
       "page_number": 1,
-      "text": "Quarterly Report The table below ...",   // words joined by spaces; lossy
+      "text": "Quarterly Report The table below ...",   // superseded by blocks + lines; lossy
       "word_count": 42,
       "width": 8.5, "height": 11.0, "unit": "inch", "angle": 0.0,
       "lines": [{"content": "Quarterly Report", "spans": [{"offset": 2, "length": 16}]}],
@@ -1025,18 +1025,35 @@ keep their meaning, so consumers written against the earlier shape (the chunker 
       "selection_marks": []
     }
   ],
+  "blocks": [                                        // reading order; ranges into extracted_text
+    {"kind": "heading", "start": 0, "end": 18, "page_number": 1, "role": "title",
+     "bounding_box": {"page_number": 1, "left": 1.0, "top": 1.0, "right": 7.5, "bottom": 1.4,
+                      "unit": "inch", "origin": "top_left", "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}},
+    {"kind": "paragraph", "start": 20, "end": 79, "page_number": 1, "role": null},
+    {"kind": "table", "start": 82, "end": 263, "page_number": 1, "table_index": 0}
+  ],
   "tables": [
     {
       "row_count": 4, "column_count": 2,
       "caption": "Table 1. Budget by year",
       "footnotes": ["Amounts in thousands."],
+      "header_rows": [0, 1],                         // derived from cell roles, not assumed
+      "rendered": "<table>\n<tr>\n<th colspan=\"2\">Budget Summary</th>\n</tr>\n...</table>",
+      "render_prefix": "<table>\n<tr>\n<th colspan=\"2\">Budget Summary</th>\n</tr>\n<tr>...</tr>\n",
+      "prefix_row_indices": [0, 1],                  // the rows every fragment repeats
+      "rows": [
+        {"row_index": 2, "rendered": "<tr>\n<td>2025</td>\n<td>980</td>\n</tr>\n",
+         "source_range": [178, 216], "continues_from_row": null}
+        // ... one entry per body row
+      ],
+      "render_suffix": "\n</table>",
       "cells": [
         {
           "row_index": 0, "column_index": 0,
           "row_span": 1, "column_span": 2,           // merged title cell
-          "kind": "columnHeader",
+          "role": "column_header",                   // canonical, not the service's spelling
           "content": "Budget Summary",
-          "spans": [{"offset": 24, "length": 14}],
+          "spans": [{"offset": 111, "length": 14}],
           "bounding_regions": [{"page_number": 1, "polygon": [1.0, 1.0, 7.5, 1.0, 7.5, 1.4, 1.0, 1.4]}]
         }
         // ... one entry per cell
@@ -1056,13 +1073,88 @@ keep their meaning, so consumers written against the earlier shape (the chunker 
 }
 ```
 
-Two things make this usable rather than merely verbose:
+Four things make this usable rather than merely verbose:
 
 - **Cells, not rendered rows.** `row_index`/`column_index` plus `row_span`/`column_span`
   rebuild the grid exactly, including merged cells — which a rendered markdown table
   cannot express. `ExtractedTable.to_grid()` does this in code.
 - **Spans are offsets into `extracted_text`.** Any element can be mapped back onto the
   markdown a chunk was cut from, and `bounding_regions` map it onto the page.
+- **`blocks` is the document in reading order.** Each block declares what it is, the
+  character range it occupies in `extracted_text`, its page, and — for a table — the index
+  of its entry in `tables`. Blocks do not overlap and do not nest: the service reports a
+  paragraph for every table cell, and those are reachable through the table rather than
+  listed twice.
+- **A table's rendering is provided, never parsed.** See below.
+
+`pages[].text` — the page's words joined by single spaces — is **superseded**. It loses
+line breaks and cell boundaries; `blocks` and `pages[].lines` carry the same content with
+its layout intact. It remains for compatibility and is not being removed here, because its
+consumers have to be checked first.
+
+#### The canonical model, and why it names no service
+
+Downstream stages consume `text.json` without knowing which extractor produced it. That is
+a contract, not a convention, and it is written down in
+`src/application/ports/document_extractor.py`:
+
+- **Every block's `(start, end)` resolves against `extracted_text`.** Holding to that is
+  the *adapter's* job. Document Intelligence reports spans into the very markdown it
+  returns, so its adapter passes them through. An extractor that has no such string — a
+  Docling adapter would render the markdown itself — records the range as it writes each
+  element. A consumer may rely on the invariant either way.
+- **The adapter renders; the consumer never parses — including for part of a table.** A
+  table carries `rendered`, its text exactly as it appears in `extracted_text`. A consumer
+  that needs *some* rows composes `render_prefix` + those rows' `rendered` in document
+  order + `render_suffix`, and does nothing else. That fragment is a valid table in
+  whatever form the extractor produced. The fragment composed from *every* body row equals
+  `rendered` byte for byte — the exactness rule — because the adapter partitions a string
+  it already has rather than reassembling one from cell spans, which cover cell content and
+  exclude the markup around it.
+- **`header_rows` is semantic; `prefix_row_indices` is structural.** `header_rows` names
+  the rows the provider marked as headers, wherever they sit — a table whose header is row
+  3 reports `[3]` and keeps row 3 as an ordinary body row, because hoisting it would
+  reorder the document. `prefix_row_indices` names the rows `render_prefix` happens to
+  carry, which is what every fragment repeats. For HTML those are the leading header rows;
+  for a Markdown pipe table the prefix always carries the first row and its `|---|`
+  delimiter, because GFM cannot express a table without one.
+- **A vertically merged cell makes rows inseparable.** Its content is rendered once, in the
+  first row it covers, so the rows below record `continues_from_row`. A consumer keeps
+  such rows together rather than losing the content silently.
+- **Geometry records its units.** A `bounding_box` carries `unit` (`inch`, `point`,
+  `pixel`) and `origin` (`top_left`, `bottom_left`) rather than being converted, so nothing
+  compares inches against points by accident. Document Intelligence measures from a
+  top-left origin in whatever unit the *page* reports: **inches for a PDF or an Office
+  document, pixels for an image** (PNG, JPEG, TIFF, BMP). The unit is read per page, not
+  assumed — a scanned page's coordinates run to the thousands and would describe a document
+  yards across if published as inches, while looking perfectly ordinary. Where the service
+  reports no unit the box is omitted rather than guessed, because a consumer cannot tell a
+  guessed label from a true one.
+- **Cross-references are opaque.** `elements` holds the provider's own references
+  (`/paragraphs/2`, `#/texts/2`) verbatim, and no consumer interprets their format.
+
+The mapping each provider takes onto this model:
+
+| Concern | Azure Document Intelligence | Docling | Canonical |
+| --- | --- | --- | --- |
+| Rendered text | `content`, markdown, tables as HTML | `export_to_markdown()`, tables as pipe tables | `extracted_text`, whatever the adapter rendered |
+| Text ↔ element link | `spans: [{offset, length}]` into `content` | `prov[].charspan` into the item's own text | `(start, end)` into `extracted_text`, guaranteed by the adapter |
+| Reading order | `paragraphs` in order; tables interleaved by span | body tree traversal | `blocks`, in order |
+| Element kind | `paragraphs[].role` (`title`, `sectionHeading`, `pageHeader`, …) | `DocItemLabel` (`title`, `section_header`, `caption`, `list_item`, …) | `blocks[].kind`, with the provider's role kept in `blocks[].role` |
+| Cell position | `rowIndex`, `columnIndex`, `rowSpan`, `columnSpan` | `start_row_offset_idx`, `end_row_offset_idx`, `row_span`, `col_span` | `row_index`, `column_index`, `row_span`, `column_span` |
+| Header cells | `kind: columnHeader \| rowHeader \| stubHead` | `column_header`, `row_header`, `row_section` booleans | `cells[].role`, and `header_rows` derived from it |
+| Geometry | `boundingRegions[].polygon`, top-left, in the page's unit (inch for PDF, pixel for images) | `prov[].bbox` with `CoordOrigin`, points | `bounding_box` with `unit` and `origin`, polygon kept |
+| Cross-references | `elements: ["/paragraphs/2"]` | `$ref: "#/texts/2"` | `elements`, opaque |
+
+`Document Intelligence`'s `kind: description` has no canonical twin and maps to `content`;
+the provider's own spelling stays recoverable from the raw analysis sidecar. Adapters share
+the derivation helpers in `src/infrastructure/extraction/tables.py`, and every adapter is
+held to the same bar by `tests/unit/infrastructure/adapters/test_extractor_contract.py`,
+which is parameterised over the adapters that exist.
+
+Output written before `blocks` existed deserialises with an empty list. That means
+**structure unavailable**, not a document without structure — nothing is backfilled,
+because re-extraction bills the whole corpus.
 
 The raw analysis is the service response as received, including fields this API does not
 model. It exists so that a future need — or a newer service version — does not require
@@ -1072,11 +1164,17 @@ re-analysing the document, which is the most expensive operation in the pipeline
 
 - `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` (default `true`) — store the raw analysis.
   Set it to `false` where blob volume matters. On a one-page table-bearing PDF measured
-  against the real service the raw analysis was 8.8 KB against 9.6 KB for `text.json` — the
-  two are the same order of magnitude, because the typed projection re-states per-page
+  against the real service the raw analysis was 8.8 KB against 11.5 KB for `text.json` —
+  the two are the same order of magnitude, because the typed projection re-states per-page
   words and lines that the raw response holds once. Expect that ratio to shift with
   document shape rather than to hold. The structural fields in `text.json` are not gated by
   this setting.
+
+  The canonical block list and the partitioned table rendering account for 1.7 KB of that
+  11.5 KB (`text.json` was 9.8 KB before them, on the same document). The table's rendering
+  is stored once in `rendered` and once again split across `render_prefix`, `rows` and
+  `render_suffix`, which is the bulk of it — paid so that a consumer emitting part of a
+  table never has to parse markup.
 
 #### Inspecting extraction output yourself
 

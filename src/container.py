@@ -59,14 +59,14 @@ from src.infrastructure.llamaindex.chunker_llamaindex import LlamaIndexChunker
 
 if TYPE_CHECKING:
     from src.application.ports.chunker import ChunkerPort
-    from src.application.ports.document_intelligence import DocumentIntelligencePort
+    from src.application.ports.document_extractor import DocumentExtractorPort
     from src.application.ports.embedding import EmbeddingPort
 
 logger = logging.getLogger(__name__)
 
 
-def _create_document_intelligence_adapter(settings: Settings) -> "DocumentIntelligencePort":
-    """Create appropriate document intelligence adapter based on configuration.
+def _create_document_extractor_adapter(settings: Settings) -> "DocumentExtractorPort":
+    """Create the appropriate extraction adapter based on configuration.
 
     Returns FakeDocumentIntelligenceAdapter for local development (use_fake=True),
     or AzureDocumentIntelligenceAdapter for production when configured.
@@ -75,7 +75,7 @@ def _create_document_intelligence_adapter(settings: Settings) -> "DocumentIntell
         settings: Application settings
 
     Returns:
-        DocumentIntelligencePort implementation
+        DocumentExtractorPort implementation
     """
     di_settings = settings.document_intelligence
 
@@ -323,8 +323,8 @@ class Container(containers.DeclarativeContainer):
 
     # ========== Adapters (Conditional Creation via Factories) ==========
 
-    document_intelligence_adapter = providers.Singleton(
-        _create_document_intelligence_adapter,
+    document_extractor_adapter = providers.Singleton(
+        _create_document_extractor_adapter,
         settings=settings,
     )
 
@@ -386,7 +386,7 @@ class Container(containers.DeclarativeContainer):
     process_document_use_case = providers.Singleton(
         ProcessDocumentUseCase,
         blob_client=blob_store_adapter,
-        document_intelligence=document_intelligence_adapter,
+        document_extractor=document_extractor_adapter,
         pipeline_store=document_repository,
         processing_events=processing_events_repository,
     )
@@ -552,7 +552,7 @@ class Container(containers.DeclarativeContainer):
             self.vector_database_adapter,
             self.embedding_adapter,
             self.chunker_adapter,
-            self.document_intelligence_adapter,
+            self.document_extractor_adapter,
             # Repositories (may have database connections)
             self.chunk_index_repository,
             self.document_repository,

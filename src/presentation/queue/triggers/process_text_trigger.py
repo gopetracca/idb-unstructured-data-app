@@ -1,4 +1,4 @@
-"""Queue trigger for document text extraction (Document Intelligence)."""
+"""Queue trigger for the document text extraction stage."""
 
 import logging
 
@@ -44,7 +44,7 @@ async def _handle_process_text_trigger(
     """
     Handle raw-to-text queue messages.
 
-    Extracts text via Document Intelligence and enqueues chunking.
+    Extracts text via the configured extraction adapter and enqueues chunking.
     """
     logger.debug("process_text_trigger received message")
 

@@ -2,9 +2,18 @@
 
 import pytest
 
+from src.core.entities.document_analysis import BlockKind, CellRole
 from src.core.errors import DocumentProcessingError, UnsupportedFormatError
 from src.infrastructure.azure.adapters.document_intelligence_fake import (
     FakeDocumentIntelligenceAdapter,
+)
+from tests.support.extractor_contract import (
+    assert_blocks_resolve,
+    assert_every_row_subset_is_a_valid_table,
+    assert_header_rows_match_the_cells,
+    assert_rendering_is_exact,
+    assert_roles_are_canonical,
+    assert_table_blocks_resolve_to_a_table,
 )
 from tests.support.table_reconstruction import assert_cells_tile_grid, assert_spans_resolve
 
@@ -272,9 +281,9 @@ class TestFakeAdapterStructuralParity:
         table = result.tables[0]
 
         assert table.cells[0].column_span == 2
-        assert [c.kind for c in table.cells if c.row_index == 1] == [
-            "columnHeader",
-            "columnHeader",
+        assert [c.role for c in table.cells if c.row_index == 1] == [
+            CellRole.COLUMN_HEADER,
+            CellRole.COLUMN_HEADER,
         ]
 
     async def test_fake_spans_resolve_against_its_own_markdown(
@@ -332,3 +341,54 @@ class TestFakeAdapterStructuralParity:
 
         assert result.raw_analysis is None
         assert result.extraction_metadata.raw_analysis_stored is False
+
+
+class TestFakeAdapterSatisfiesTheCanonicalContract:
+    """The fake emits the contract, not a simplification of it.
+
+    It renders a Markdown pipe table — a form that cannot express a table without a header
+    line and its delimiter — so a local run exercises the case where `render_prefix`
+    carries a row. The Azure adapter's HTML never does.
+    """
+
+    @pytest.fixture
+    async def output(self, fake_document_intelligence_adapter, sample_file_id):
+        return await fake_document_intelligence_adapter.analyze_document(
+            document_content=b"Report title\n\nBody paragraph.",
+            content_type="text/plain",
+            file_id=sample_file_id,
+        )
+
+    async def test_it_emits_blocks_that_resolve_against_its_own_text(self, output):
+        """The fake writes the text itself, so it is the adapter-produces-offsets case."""
+        assert output.blocks
+        assert_blocks_resolve(output)
+        assert output.blocks[0].kind is BlockKind.HEADING
+        assert output.blocks[-1].kind is BlockKind.TABLE
+
+    async def test_the_table_block_reaches_the_table(self, output):
+        assert_table_blocks_resolve_to_a_table(output)
+        assert output.blocks[-1].table_index == 0
+
+    async def test_cell_roles_and_header_rows_are_canonical(self, output):
+        table = output.tables[0]
+
+        assert_roles_are_canonical(table)
+        assert_header_rows_match_the_cells(table)
+        assert table.header_rows == [0, 1]
+
+    async def test_the_prefix_carries_the_header_line_and_its_delimiter(self, output):
+        """GFM has no headerless table: a fragment without `|---|` is not one."""
+        table = output.tables[0]
+
+        assert table.render_prefix.startswith("| Simulated Table ||\n| --- | --- |\n")
+        assert table.prefix_row_indices == [0, 1]
+
+    async def test_the_parts_are_exactly_the_whole(self, output):
+        table = output.tables[0]
+
+        assert table.fragment() == table.rendered
+        assert_rendering_is_exact(table, output.extracted_text)
+
+    async def test_every_fragment_is_a_table_in_that_form(self, output):
+        assert_every_row_subset_is_a_valid_table(output.tables[0])

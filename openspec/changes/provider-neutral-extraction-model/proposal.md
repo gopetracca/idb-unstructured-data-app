@@ -125,6 +125,9 @@ than a looser one.
   the fake adapter, `src/application/use_cases/process_document.py` (serialise blocks)
 - Not affected: the `202` contract, blob layout, references, and every stage after
   `convert` — those change in `structure-aware-chunking`, which depends on this
-- Risk: the block list roughly doubles `text.json` for structure-heavy documents. Measured
-  on the sample used in `preserve-full-extraction-output`: 9.8 KB → ~12 KB. Same order,
-  and the raw sidecar is unchanged.
+- Risk: `text.json` grows. Measured against the real service on the sample used in
+  `preserve-full-extraction-output`: **9.8 KB → 11.5 KB**, +17%. Most of it is the table's
+  rendering being stored twice — once whole in `rendered`, once split across
+  `render_prefix`, `rows` and `render_suffix` — so the growth tracks how much of a document
+  is tables rather than how long it is. Same order of magnitude, and the raw sidecar is
+  unchanged at 8.8 KB.
