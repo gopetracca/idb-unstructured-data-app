@@ -69,10 +69,6 @@ _EXTENSIONS = {
 }
 
 
-class DoclingNotInstalledError(RuntimeError):
-    """Raised when Docling is selected but the package is not in the image."""
-
-
 class DoclingExtractionAdapter(DocumentExtractorPort):
     """Extraction through Docling, satisfying the same contract as every other adapter."""
 
@@ -192,15 +188,14 @@ class DoclingExtractionAdapter(DocumentExtractorPort):
 
     def _build_converter(self):
         """Construct the `DocumentConverter` this adapter reuses for every document."""
-        try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-        except ImportError as error:
-            raise DoclingNotInstalledError(
-                "EXTRACTION_ADAPTER=docling, but this image was built without Docling "
-                "support. Install the 'docling' extra, or select another extraction engine."
-            ) from error
+        # Not guarded for ImportError: this module already imports `docling_core` at the
+        # top, so an environment without the extra never reaches here. The container turns
+        # that import failure into a message naming the setting and the fix, and it is the
+        # single place that does — a second, unreachable copy of the message would only
+        # ever be wrong.
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
 
         artifacts = self._artifacts_path()
         options = PdfPipelineOptions(

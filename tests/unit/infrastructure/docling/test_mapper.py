@@ -28,6 +28,7 @@ from tests.support.docling_documents import (
     TITLE,
     build_sample_document,
     build_table_with_a_vertical_merge,
+    build_table_with_overlapping_cells,
 )
 from tests.support.extractor_contract import (
     assert_satisfies_the_extraction_contract,
@@ -182,3 +183,47 @@ class TestWhatDoclingCannotFill:
 
     def test_confidence_is_left_unset_rather_than_derived(self, output):
         assert output.extraction_metadata.extraction_confidence == 0.0
+
+
+class TestRealTablesAreCopiedNotRepaired:
+    """Docling's table model emits overlapping and sparse cells on complex real tables.
+
+    Measured, not assumed: over the two IADB reports in `test-data/`, Docling reported 20
+    overlapping grid positions and 362 declared positions covered by no cell, across 44
+    tables. The offsets it gives agree with the spans it gives — this is the model's
+    reading of the page, not a mapping error — so the adapter copies it. `to_grid()` is
+    the only thing that has to cope, and it does so without inventing anything.
+
+    This is a real difference from Document Intelligence, which guarantees a clean tiling.
+    A consumer that needs one must check for it rather than assume it across engines.
+    """
+
+    @pytest.fixture
+    def overlapping(self):
+        return map_document(build_table_with_overlapping_cells(), file_id="overlap").tables[0]
+
+    def test_both_overlapping_cells_survive(self, overlapping):
+        at_position = [
+            cell.content
+            for cell in overlapping.cells
+            if cell.row_index <= 1 < cell.row_index + cell.row_span
+            and cell.column_index <= 2 < cell.column_index + cell.column_span
+        ]
+
+        assert sorted(at_position) == ["At approval", "Baseline"]
+
+    def test_the_grid_resolves_rather_than_raising(self, overlapping):
+        """Later cells win the contested position and uncovered ones stay None — a
+        reconstruction that says "nothing here" where the model found nothing."""
+        grid = overlapping.to_grid()
+
+        assert grid[1][2] in {"At approval", "Baseline"}
+        assert grid[0][1] is None
+        assert len(grid) == 3 and all(len(row) == 3 for row in grid)
+
+    def test_the_canonical_contract_still_holds(self):
+        """What the port promises is unaffected: this is a table-quality property, not an
+        offset, rendering or composition one."""
+        output = map_document(build_table_with_overlapping_cells(), file_id="overlap")
+
+        assert_satisfies_the_extraction_contract(output)

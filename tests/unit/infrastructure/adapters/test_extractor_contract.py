@@ -24,23 +24,23 @@ from src.core.entities.document_analysis import (
     MarkdownOutput,
     TableCell,
 )
-from src.infrastructure.extraction.tables import partition_pipe_table
 from src.infrastructure.azure.adapters.document_intelligence_azure import (
     AzureDocumentIntelligenceAdapter,
 )
 from src.infrastructure.azure.adapters.document_intelligence_fake import (
     FakeDocumentIntelligenceAdapter,
 )
+from src.infrastructure.extraction.tables import partition_pipe_table
 from tests.support.document_intelligence_payloads import TABLE_PAYLOAD, analyze_result
 from tests.support.extractor_contract import (
     _row_selections,
     assert_blocks_are_ordered_and_disjoint,
     assert_blocks_resolve,
-    assert_row_selections_compose_into_a_valid_table,
     assert_header_rows_match_the_cells,
     assert_prefix_rows_are_disjoint_from_body_rows,
     assert_rendering_is_exact,
     assert_roles_are_canonical,
+    assert_row_selections_compose_into_a_valid_table,
     assert_rows_carry_their_provenance,
     assert_table_blocks_resolve_to_a_table,
 )

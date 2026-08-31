@@ -399,6 +399,41 @@ Rejected — **normalise Docling into Azure's `AnalyzeResult` shape.** Fabricati
 schema loses exactly what a verbatim copy exists to preserve, and reintroduces the lossy
 filter that preserving the full extraction output was written to remove.
 
+## Measured, on IADB documents
+
+Two real reports from `test-data/` — a 34-page Guyana project completion report and a
+39-page Uruguay CCLIP proposal — converted on an Apple-silicon workstation, models resident:
+
+| | GY-L1040 PCR | Uruguay CCLIP |
+| --- | --- | --- |
+| Pages | 34 | 39 |
+| Wall clock | 32.1 s | 37.6 s |
+| **Seconds per page** | **0.94** | **0.96** |
+| Tables found | 18 | 23 |
+| Blocks | 200 | 231 |
+| Characters | 285,074 | 219,842 |
+
+Converter construction 1.75 s; the first conversion pays 3.7 s of model load. Peak RSS
+**2.1 GB** for one resident converter, which is the figure that caps concurrency — each
+worker holds its own copy of the weights.
+
+Throughput is *better* than the published ~3.1 s/page, so the queue's five-minute
+visibility timeout is not the binding constraint these documents suggested it might be. The
+memory figure is the one that matters for sizing, and it is large.
+
+Two findings worth more than the timings:
+
+- **The canonical contract holds on real documents.** All nine contract properties pass
+  over both reports and their 41 tables — offsets, disjointness, table blocks reaching
+  their table, canonical roles, derived header rows, exact rendering, row provenance,
+  prefix/body disjointness, and fragment composition.
+- **Clean grid tiling does not, and it is not the adapter's doing.** Docling reported 20
+  overlapping grid positions and 362 declared positions covered by no cell. Its
+  `start/end_*_offset_idx` agree with its `row_span`/`col_span` everywhere, so the adapter
+  is copying the model faithfully; the model simply reads nested headers imperfectly. This
+  is a genuine quality difference from Document Intelligence, which guarantees a tiling,
+  and a consumer that needs one has to check rather than assume it across engines.
+
 ## Open questions
 
 All of these are inputs to the deferred deployment work, not to the adapter. None blocks

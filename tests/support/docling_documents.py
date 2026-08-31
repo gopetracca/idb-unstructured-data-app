@@ -170,3 +170,67 @@ def build_table_with_a_vertical_merge() -> DoclingDocument:
         prov=_prov(1, 640.0, 560.0),
     )
     return doc
+
+
+def build_table_with_overlapping_cells() -> DoclingDocument:
+    """A table whose cells overlap and do not cover the declared grid.
+
+    Not a contrived case: this is the shape Docling's table-structure model produces on the
+    nested headers in real reports. Taken from an IADB project completion report, where a
+    header cell spanning rows 0-2 of column 2 sits on top of a second cell occupying row 1
+    of the same column, and several declared positions are covered by nothing at all.
+
+    Docling reports it; the adapter copies it. Repairing the grid here would invent
+    structure the model did not find, and the invention would be indistinguishable from a
+    reading.
+    """
+    doc = DoclingDocument(name="overlapping")
+    doc.add_page(page_no=1, size=Size(width=PAGE_WIDTH, height=PAGE_HEIGHT))
+    cells = [
+        DoclingTableCell(
+            text="Indicator",
+            start_row_offset_idx=0,
+            end_row_offset_idx=2,
+            start_col_offset_idx=0,
+            end_col_offset_idx=1,
+            column_header=True,
+        ),
+        DoclingTableCell(
+            text="At approval",
+            start_row_offset_idx=0,
+            end_row_offset_idx=2,
+            start_col_offset_idx=2,
+            end_col_offset_idx=3,
+            column_header=True,
+        ),
+        # Overlaps the cell above at (1, 2) — both are reported, exactly as Docling does.
+        DoclingTableCell(
+            text="Baseline",
+            start_row_offset_idx=1,
+            end_row_offset_idx=2,
+            start_col_offset_idx=2,
+            end_col_offset_idx=3,
+            column_header=True,
+        ),
+        DoclingTableCell(
+            text="Non-revenue water",
+            start_row_offset_idx=2,
+            end_row_offset_idx=3,
+            start_col_offset_idx=0,
+            end_col_offset_idx=1,
+        ),
+        DoclingTableCell(
+            text="64%",
+            start_row_offset_idx=2,
+            end_row_offset_idx=3,
+            start_col_offset_idx=2,
+            end_col_offset_idx=3,
+        ),
+    ]
+    # Column 1 is declared and covered by nothing, which is the other half of what the
+    # model does on these tables.
+    doc.add_table(
+        data=TableData(num_rows=3, num_cols=3, table_cells=cells),
+        prov=_prov(1, 640.0, 560.0),
+    )
+    return doc

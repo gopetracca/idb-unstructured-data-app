@@ -104,6 +104,17 @@ switched on in a deployed environment.
       left empty.
 - [x] 5.5 Table reconstruction: `assert_cells_tile_grid` on a Docling-produced
       `ExtractedTable`, reusing the existing assertion rather than writing a second copy.
+      **It holds for the fixtures and the sample PDF and does not hold in general** —
+      measured over two real IADB reports, Docling reported 20 overlapping grid positions
+      and 362 declared positions covered by no cell, across 44 tables. Its offsets agree
+      with its spans, so this is the model's reading of the page rather than a mapping
+      error, and the adapter copies it rather than repairing it. Clean tiling is a
+      Document Intelligence guarantee, not a cross-engine one; pinned by
+      `TestRealTablesAreCopiedNotRepaired`.
+- [x] 5.10 Prove the deployed failure mode: with `docling*` blocked at the meta path — an
+      image built without the extra — the real `src/main.py` lifespan refuses to start and
+      the error names the setting and the remedy. In a subprocess, because patching an
+      import in-process tests the container branch and not the entrypoint.
 - [x] 5.6 `tests/unit/infrastructure/docling/test_adapter.py` — over-limit file size is
       refused before conversion; the page limit reaches Docling; an unsupported content type
       is refused; partial success and failure fail the stage; a missing artifacts directory
