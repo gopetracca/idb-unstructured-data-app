@@ -1,5 +1,9 @@
 # adapter-selection Delta
 
+Rebased onto the merged `provider-neutral-extraction-model` specs. *Extraction Adapters Are
+Interchangeable* already says a second extractor changes no consumer, and this change is
+the evidence for it rather than a restatement of it, so it is not repeated here.
+
 ## ADDED Requirements
 
 ### Requirement: Extraction Adapter Selection Is Strict
@@ -50,7 +54,12 @@ path for them is configured, and SHALL fail with a message naming that setting.
 #### Scenario: No silent substitution
 
 - **WHEN** the Docling adapter cannot be constructed
-- **THEN** no other adapter is substituted, in contrast with the Azure adapter's fallback to a fake, because a deployment that explicitly asked for Docling has not consented to synthetic text
+- **THEN** no other adapter is substituted, because a deployment that explicitly asked for Docling has not consented to synthetic text
+
+#### Scenario: The boundary with the fake fallback
+
+- **WHEN** comparing this with *Silent Fallback To Fakes When Azure Is Unconfigured*, where startup succeeds and the readiness probe still reports ready
+- **THEN** that requirement is unchanged and still scoped to an unconfigured Azure dependency; a named engine that cannot be built is the opposite case, and it stops startup rather than being absorbed into a warning
 
 #### Scenario: Engine selected without its dependency
 
