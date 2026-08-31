@@ -237,6 +237,13 @@ need no knowledge of which extractor ran.
 - **THEN** the box declares its unit and its coordinate origin, and no consumer is required
   to infer either
 
+#### Scenario: The provider's own role is carried beside the canonical kind
+
+- **WHEN** the extraction service assigns an element a role in its own vocabulary
+- **THEN** the block's kind is canonical and the service's role is carried verbatim
+  alongside it, uninterpreted, so that narrowing to a canonical kind costs no information
+  and no consumer is required to understand the service's vocabulary
+
 #### Scenario: Provider references are preserved but not interpreted
 
 - **WHEN** the extraction service links an element to other elements
@@ -362,7 +369,9 @@ block list required by *Provider-Neutral Extraction Output*.
 
 - **WHEN** the service assigns a paragraph a role such as title, section heading, page
   header, page footer, or footnote
-- **THEN** that role is present on the corresponding paragraph, expressed canonically
+- **THEN** that role is preserved on the corresponding paragraph exactly as the service
+  spelled it, and no requirement depends on its vocabulary — what an element *is*, said
+  canonically, is its block's kind
 
 #### Scenario: Figures and sections preserved
 
