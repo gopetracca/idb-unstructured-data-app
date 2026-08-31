@@ -40,7 +40,7 @@ from src.infrastructure.azure.adapters.document_intelligence_azure import (
 from tests.support.extractor_contract import (
     assert_blocks_are_ordered_and_disjoint,
     assert_blocks_resolve,
-    assert_every_row_subset_is_a_valid_table,
+    assert_row_selections_compose_into_a_valid_table,
     assert_header_rows_match_the_cells,
     assert_prefix_rows_are_disjoint_from_body_rows,
     assert_rendering_is_exact,
@@ -283,7 +283,7 @@ class TestLiveOutputSatisfiesTheCanonicalContract:
     def test_every_selection_of_rows_composes_into_a_valid_table(
         self, live_output: MarkdownOutput
     ):
-        assert_every_row_subset_is_a_valid_table(live_output.tables[0])
+        assert_row_selections_compose_into_a_valid_table(live_output.tables[0])
 
     def test_the_stored_output_keeps_all_of_it(self, live_output: MarkdownOutput):
         """text.json is what downstream reads, so the guarantees have to survive it."""

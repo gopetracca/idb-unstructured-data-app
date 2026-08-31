@@ -17,7 +17,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.config.settings import DocumentIntelligenceSettings
-from src.core.entities.document_analysis import BlockKind, MarkdownOutput
+from src.core.entities.document_analysis import (
+    BlockKind,
+    CellRole,
+    ExtractedTable,
+    MarkdownOutput,
+    TableCell,
+)
+from src.infrastructure.extraction.tables import partition_pipe_table
 from src.infrastructure.azure.adapters.document_intelligence_azure import (
     AzureDocumentIntelligenceAdapter,
 )
@@ -26,9 +33,10 @@ from src.infrastructure.azure.adapters.document_intelligence_fake import (
 )
 from tests.support.document_intelligence_payloads import TABLE_PAYLOAD, analyze_result
 from tests.support.extractor_contract import (
+    _row_selections,
     assert_blocks_are_ordered_and_disjoint,
     assert_blocks_resolve,
-    assert_every_row_subset_is_a_valid_table,
+    assert_row_selections_compose_into_a_valid_table,
     assert_header_rows_match_the_cells,
     assert_prefix_rows_are_disjoint_from_body_rows,
     assert_rendering_is_exact,
@@ -169,7 +177,7 @@ class TestEveryAdapterSatisfiesTheContract:
         output = await build_output()
 
         for table in output.tables:
-            assert_every_row_subset_is_a_valid_table(table)
+            assert_row_selections_compose_into_a_valid_table(table)
 
     async def test_a_consumer_composing_rows_behaves_identically_for_either_form(
         self, build_output
@@ -186,3 +194,62 @@ class TestEveryAdapterSatisfiesTheContract:
 
         assert first_row_only == table.fragment(table.rows[:1])
         assert table.rows[0].rendered in first_row_only
+
+
+@pytest.mark.unit
+class TestTheContractItselfTerminates:
+    """A check that cannot finish on a real document is not a check.
+
+    Checking *every* subset of body rows is 2**n fragments. On the three-row fixtures in
+    this file that is 8 and free; on a 30-row table — entirely ordinary in a published
+    report — it is a billion, and the assertion stops being a test and becomes a hang. It
+    stays exhaustive where exhaustive is cheap and samples where it is not, and this is
+    what stops that limit being quietly removed again.
+    """
+
+    @staticmethod
+    def _table_with(row_count: int) -> ExtractedTable:
+        """A pipe table with `row_count` body rows, partitioned as an adapter would."""
+        header = "| Year | Amount |\n|------|--------|\n"
+        body = "".join(f"| 202{index % 10} | {index} |\n" for index in range(row_count))
+        cells = [
+            TableCell(row_index=0, column_index=column, role=CellRole.COLUMN_HEADER, content="h")
+            for column in range(2)
+        ]
+        partition = partition_pipe_table(
+            rendered=header + body, header_rows=[0], continuations={}, source_offset=0
+        )
+        return ExtractedTable(
+            row_count=row_count + 1,
+            column_count=2,
+            cells=cells,
+            header_rows=[0],
+            rendered=header + body,
+            render_prefix=partition.prefix,
+            prefix_row_indices=partition.prefix_row_indices,
+            render_suffix=partition.suffix,
+            rows=partition.rows,
+        )
+
+    def test_a_small_table_is_still_checked_exhaustively(self):
+        table = self._table_with(4)
+
+        assert len(_row_selections(table)) == 2 ** len(table.rows)
+
+    def test_a_large_table_does_not_cost_two_to_the_row_count(self):
+        table = self._table_with(40)
+
+        selections = _row_selections(table)
+
+        assert len(selections) < 200, "the check went back to enumerating every subset"
+
+    def test_every_row_still_appears_in_some_selection(self):
+        """Sampling must not stop covering a row, or a mis-rendered one goes unseen."""
+        table = self._table_with(40)
+
+        covered = {row.row_index for selection in _row_selections(table) for row in selection}
+
+        assert covered == {row.row_index for row in table.rows}
+
+    def test_the_assertion_passes_on_a_large_well_formed_table(self):
+        assert_row_selections_compose_into_a_valid_table(self._table_with(40))

@@ -109,11 +109,47 @@ def assert_prefix_rows_are_disjoint_from_body_rows(table: ExtractedTable) -> Non
     assert body == sorted(body), "body rows are not in document order"
 
 
-def assert_every_row_subset_is_a_valid_table(table: ExtractedTable) -> None:
-    """Any selection of body rows composes into a table in the extractor's own form."""
-    for size in range(len(table.rows) + 1):
-        for selection in combinations(table.rows, size):
-            assert_is_a_valid_table(table.fragment(list(selection)))
+# Above this many body rows, checking every subset stops being a test and becomes a hang:
+# the count is 2**n, so a 30-row table — entirely ordinary in a real document — is a
+# billion fragments. Ten rows is 1024, which is free.
+_EXHAUSTIVE_ROW_LIMIT = 10
+
+
+def assert_row_selections_compose_into_a_valid_table(table: ExtractedTable) -> None:
+    """Selections of body rows compose into a table in the extractor's own form.
+
+    Exhaustively for a small table, and over a representative sample for a large one. The
+    sample is not a weakening: the property under test belongs to the *partition* — a
+    prefix that is exactly the rendering before the first body row, and a suffix exactly
+    the rendering after the last — and a partition that composes wrongly does so for a
+    single row as readily as for the 2**n-th subset. What the sample keeps is every case
+    where a boundary could be got wrong: nothing, each row alone, each adjacent pair, the
+    leading and trailing runs, a gap in the middle, and everything.
+    """
+    for selection in _row_selections(table):
+        assert_is_a_valid_table(table.fragment(list(selection)))
+
+
+def _row_selections(table: ExtractedTable) -> list[tuple]:
+    """The selections to check: every subset while that is cheap, a sample when it is not."""
+    rows = table.rows
+    if len(rows) <= _EXHAUSTIVE_ROW_LIMIT:
+        return [
+            selection
+            for size in range(len(rows) + 1)
+            for selection in combinations(rows, size)
+        ]
+
+    selections: list[tuple] = [(), tuple(rows)]
+    selections.extend((row,) for row in rows)
+    selections.extend((rows[i], rows[i + 1]) for i in range(len(rows) - 1))
+    selections.append(tuple(rows[:3]))
+    selections.append(tuple(rows[-3:]))
+    # A gap: the parts either side of a hole must still compose, which is the case a
+    # consumer emitting "the rows that matched" actually produces.
+    selections.append((rows[0], rows[-1]))
+    selections.append(tuple(rows[: len(rows) // 2]) + tuple(rows[len(rows) // 2 + 1 :]))
+    return selections
 
 
 def assert_is_a_valid_table(fragment: str) -> None:
@@ -150,4 +186,4 @@ def assert_satisfies_the_extraction_contract(output: MarkdownOutput) -> None:
         assert_rendering_is_exact(table, output.extracted_text)
         assert_rows_carry_their_provenance(table, output.extracted_text)
         assert_prefix_rows_are_disjoint_from_body_rows(table)
-        assert_every_row_subset_is_a_valid_table(table)
+        assert_row_selections_compose_into_a_valid_table(table)
