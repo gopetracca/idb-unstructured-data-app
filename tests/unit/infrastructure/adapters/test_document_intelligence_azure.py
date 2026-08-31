@@ -35,7 +35,7 @@ from tests.support.document_intelligence_payloads import (
 from tests.support.extractor_contract import (
     assert_blocks_are_ordered_and_disjoint,
     assert_blocks_resolve,
-    assert_every_row_subset_is_a_valid_table,
+    assert_row_selections_compose_into_a_valid_table,
     assert_header_rows_match_the_cells,
     assert_prefix_rows_are_disjoint_from_body_rows,
     assert_rendering_is_exact,
@@ -937,7 +937,7 @@ class TestCanonicalTableRendering:
     async def test_any_selection_of_rows_is_a_valid_table(self, table):
         extracted, _ = table
 
-        assert_every_row_subset_is_a_valid_table(extracted)
+        assert_row_selections_compose_into_a_valid_table(extracted)
 
 
 class TestTablesTheMainFixtureCannotShow:
@@ -996,7 +996,7 @@ class TestTablesTheMainFixtureCannotShow:
         table = late_header.tables[0]
 
         assert table.fragment() == table.rendered == LATE_HEADER_TABLE_HTML
-        assert_every_row_subset_is_a_valid_table(table)
+        assert_row_selections_compose_into_a_valid_table(table)
 
 
 class TestEveryCanonicalFieldHasAProducer:

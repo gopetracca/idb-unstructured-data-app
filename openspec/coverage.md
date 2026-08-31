@@ -47,6 +47,7 @@ Keep it current when adding a capability or a top-level source directory.
 | `src/infrastructure/azure/clients/search_client.py`, `adapters/vector_search_azure.py` | `search`, `collection-management`, `vector-ingestion` |
 | `src/infrastructure/azure/adapters/index_schema_mapper.py` | `index-schema-registry` |
 | `src/infrastructure/azure/clients/document_intelligence_client.py`, `adapters/document_intelligence_*.py` | `content-extraction`, `adapter-selection` |
+| `src/infrastructure/docling/**`, `src/infrastructure/extraction/**` | `content-extraction`, `adapter-selection` |
 | `src/infrastructure/azure/adapters/embedding_*.py` | `chunk-vectorization`, `adapter-selection` |
 | `src/infrastructure/chonkie/**`, `src/infrastructure/llamaindex/**` | `document-chunking`, `adapter-selection` |
 | `src/infrastructure/sqlserver/database.py`, `models/**`, `repositories/**`, `alembic/**`, `run_migrations.py` | `metadata-persistence` |

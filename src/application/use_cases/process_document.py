@@ -59,14 +59,16 @@ class ProcessDocumentUseCase:
             pipeline_store: Repository for pipeline state operations
             processing_events: Optional ProcessingEventsPort for stage tracking
             persist_raw_analysis: Whether to store the verbatim analysis response as a
-                sidecar blob. Defaults to DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT.
+                sidecar blob. Defaults to PERSIST_RAW_EXTRACTION, falling back to
+                DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT — whether the response is stored
+                is a property of this stage, not of the engine that produced it.
         """
         self._blob_client = blob_client
         self._document_extractor = document_extractor
         self._pipeline_store = pipeline_store
         self._processing_events = processing_events
         if persist_raw_analysis is None:
-            persist_raw_analysis = get_settings().document_intelligence.persist_raw_result
+            persist_raw_analysis = get_settings().raw_extraction_persisted
         self._persist_raw_analysis = persist_raw_analysis
 
     async def execute(self, request: DocumentAnalysisRequest) -> DocumentAnalysisResult:

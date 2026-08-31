@@ -9,7 +9,7 @@ from src.infrastructure.azure.adapters.document_intelligence_fake import (
 )
 from tests.support.extractor_contract import (
     assert_blocks_resolve,
-    assert_every_row_subset_is_a_valid_table,
+    assert_row_selections_compose_into_a_valid_table,
     assert_header_rows_match_the_cells,
     assert_rendering_is_exact,
     assert_roles_are_canonical,
@@ -391,4 +391,4 @@ class TestFakeAdapterSatisfiesTheCanonicalContract:
         assert_rendering_is_exact(table, output.extracted_text)
 
     async def test_every_fragment_is_a_table_in_that_form(self, output):
-        assert_every_row_subset_is_a_valid_table(output.tables[0])
+        assert_row_selections_compose_into_a_valid_table(output.tables[0])

@@ -159,3 +159,6 @@ iadb-root-ca.crt
 # Local scratch files
 Dockerfile copy
 nul
+
+# Local Docling evaluation output, written by scripts/extract_with_docling.py.
+docling-extraction-results/

@@ -1,5 +1,9 @@
 # adapter-selection Delta
 
+Rebased onto the merged `provider-neutral-extraction-model` specs. *Extraction Adapters Are
+Interchangeable* already says a second extractor changes no consumer, and this change is
+the evidence for it rather than a restatement of it, so it is not repeated here.
+
 ## ADDED Requirements
 
 ### Requirement: Extraction Adapter Selection Is Strict
@@ -24,20 +28,45 @@ and SHALL NOT treat an unrecognised value as a request for any particular engine
 
 ### Requirement: Docling Adapter Fails Fast On Missing Model Artifacts
 
-The system SHALL verify Docling's model artifacts are present when the adapter is
-constructed, and SHALL fail with a message naming the artifacts path.
+The system SHALL verify Docling's model artifacts when the adapter is constructed and a
+path for them is configured, and SHALL fail with a message naming that setting.
 
-#### Scenario: Artifacts missing
+#### Scenario: A configured artifacts path holds nothing
 
-- **WHEN** the Docling adapter is constructed and no model artifacts are found at `DOCLING_ARTIFACTS_PATH`
-- **THEN** construction fails with an error naming `DOCLING_ARTIFACTS_PATH` and the offline-artifact requirement, rather than deferring to a first conversion that would hang on a blocked download
+- **WHEN** the Docling adapter is constructed and `DOCLING_ARTIFACTS_PATH` names a directory that is absent or empty
+- **THEN** construction fails with an error naming `DOCLING_ARTIFACTS_PATH` and how to populate it, rather than deferring to a first conversion that would hang on a blocked download
+
+#### Scenario: No path configured
+
+- **WHEN** `DOCLING_ARTIFACTS_PATH` is unset
+- **THEN** Docling resolves the artifacts its own way, which is correct on a workstation and is why the setting exists for the environments where it is not
 
 #### Scenario: Failure surfaces at startup
 
-- **WHEN** the artifacts are missing and Docling is the configured engine
-- **THEN** the failure occurs while the container is starting, so the readiness probe does not report ready on a deployment that cannot extract
+- **WHEN** the configured extraction engine cannot be constructed for any reason
+- **THEN** the failure occurs while the process is starting rather than on the first document, so the readiness probe does not report ready on a deployment that cannot extract, and no queue message is dequeued, failed, redelivered and poisoned to discover it
+
+#### Scenario: Both entrypoints check
+
+- **WHEN** the queue-trigger host starts, as well as the HTTP app
+- **THEN** the same check runs, because extraction runs in the trigger and a host that cannot extract should not start
 
 #### Scenario: No silent substitution
 
 - **WHEN** the Docling adapter cannot be constructed
-- **THEN** no other adapter is substituted, in contrast with the Azure adapter's fallback to a fake, because a deployment that explicitly asked for Docling has not consented to synthetic text
+- **THEN** no other adapter is substituted, because a deployment that explicitly asked for Docling has not consented to synthetic text
+
+#### Scenario: The boundary with the fake fallback
+
+- **WHEN** comparing this with *Silent Fallback To Fakes When Azure Is Unconfigured*, where startup succeeds and the readiness probe still reports ready
+- **THEN** that requirement is unchanged and still scoped to an unconfigured Azure dependency; a named engine that cannot be built is the opposite case, and it stops startup rather than being absorbed into a warning
+
+#### Scenario: Engine selected without its dependency
+
+- **WHEN** `EXTRACTION_ADAPTER` is `docling` in an environment where the optional dependency is not installed
+- **THEN** startup fails with an error naming the setting and the command that installs the extra, rather than with a bare `ModuleNotFoundError` for a transitive package name
+
+#### Scenario: The deployment image does not yet build the extra
+
+- **WHEN** `EXTRACTION_ADAPTER` is `docling` in the deployment image, which installs no optional extras
+- **THEN** the host fails to start with that error, so the engine is unusable-and-loud rather than usable-looking-and-broken, until the image is built with the extra and its model artifacts
