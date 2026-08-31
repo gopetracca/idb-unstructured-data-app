@@ -11,6 +11,7 @@ from src.container import (
     ExtractionConfigurationError,
     verify_extraction_configuration,
 )
+from src.core.errors import DocumentProcessingError
 
 
 @pytest.mark.unit
@@ -145,10 +146,33 @@ class TestExtractionIsVerifiedAtStartup:
 
     def test_it_raises_rather_than_deferring_to_the_first_document(self) -> None:
         """An engine that cannot be built takes the process down at startup, where the
-        readiness probe can see it, instead of failing every message it is handed."""
+        readiness probe can see it, instead of failing every message it is handed.
+
+        Deliberately indifferent to *why* it cannot be built. On a machine with the extra
+        that is the unreadable artifacts path below; in CI, which installs no extras — the
+        same as the deployment image — it is Docling's absence. Both are the failure this
+        check exists to move to startup, and asserting one of them would have made this
+        test pass only where the problem is least likely.
+        """
         settings = Settings(extraction_adapter="docling", docling={"artifacts_path": "/nope"})
         container = Container()
 
         with container.settings.override(providers.Object(settings)):
-            with pytest.raises(Exception, match="DOCLING_ARTIFACTS_PATH"):
+            with pytest.raises(
+                (ExtractionConfigurationError, DocumentProcessingError)
+            ) as failure:
+                verify_extraction_configuration(container)
+
+        assert "EXTRACTION_ADAPTER" in str(failure.value) or "DOCLING_ARTIFACTS_PATH" in str(
+            failure.value
+        )
+
+    def test_an_unreadable_artifacts_path_is_found_at_startup(self) -> None:
+        """The half of the above that needs the extra present to reach at all."""
+        pytest.importorskip("docling", reason="the optional docling extra is not installed")
+        settings = Settings(extraction_adapter="docling", docling={"artifacts_path": "/nope"})
+        container = Container()
+
+        with container.settings.override(providers.Object(settings)):
+            with pytest.raises(DocumentProcessingError, match="DOCLING_ARTIFACTS_PATH"):
                 verify_extraction_configuration(container)
