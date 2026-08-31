@@ -1,6 +1,19 @@
 # Tasks
 
 Sequencing note: §0 is a spike whose result decides whether §2 onward is worth doing.
+> **`provider-neutral-extraction-model` has since shipped (PR #8) and changed the target.**
+> Three things these tasks predate: the port is now `DocumentExtractorPort`
+> (`DocumentIntelligencePort` remains as an alias, so nothing here fails to compile);
+> `MarkdownOutput` gained `blocks`, and cell `kind` became a canonical `role`; and a table
+> must carry `rendered` plus a `render_prefix` / `rows` / `render_suffix` partition of it.
+> That last one is the part this change's "a projection, not a reconstruction" framing does
+> not cover — Docling has no single rendered string to partition, so its adapter must render
+> the markdown itself and split what it wrote. The bar is executable:
+> `tests/unit/infrastructure/adapters/test_extractor_contract.py` is parameterised over the
+> adapters that exist, and a Docling adapter joins that list rather than being measured
+> against a looser standard. `src/infrastructure/extraction/tables.py` already has the
+> pipe-table partitioner it will need.
+
 `preserve-full-extraction-output` is merged (PR #4), so the `MarkdownOutput`, the
 run-scoped analysis sidecar, and `analysis_blob_ref` that §3 fills already exist in code —
 along with the atomic publication protocol §3 must not weaken.

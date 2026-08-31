@@ -1,6 +1,8 @@
 # Tasks
 
-> Depends on `provider-neutral-extraction-model`.
+> Depends on `provider-neutral-extraction-model`, which has shipped and is archived. The
+> contract these tasks build on is in `specs/content-extraction/`, under
+> *Provider-Neutral Extraction Output* and *Normalised Table Structure*.
 
 ## 1. Partitioning
 
