@@ -16,9 +16,13 @@ switched on in a deployed environment.
 - [x] 1.3 Branch `_create_document_extractor_adapter` in `src/container.py`: explicit fake
       still wins; `docling` selects the Docling adapter; the Azure-unconfigured fallback to
       the fake is unchanged and never selects Docling.
-- [x] 1.4 Raise a clear "image built without Docling support" error when `docling` is
-      selected and the package is not installed, rather than letting the ImportError
-      surface.
+- [x] 1.4 Raise a clear error naming `EXTRACTION_ADAPTER` and the install command when
+      `docling` is selected and the package is not installed, rather than letting a bare
+      `ModuleNotFoundError` for a transitive package name surface.
+- [x] 1.5 Build the configured extraction adapter at startup, from both the HTTP lifespan
+      and the queue-trigger host. Every provider is lazy, so without this the first
+      *document* is what discovers an engine that cannot be constructed — inside a queue
+      trigger, whose message is then redelivered and poisoned.
 
 ## 2. Dependency
 
@@ -88,7 +92,9 @@ switched on in a deployed environment.
       accepted values, startup failure on anything else, and that the legacy
       `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` still governs raw persistence.
 - [x] 5.2 `tests/unit/test_container.py` — selection matrix: default, `docling`, explicit
-      fake wins, Azure-unconfigured falls back to the fake and not to Docling.
+      fake wins, Azure-unconfigured falls back to the fake and not to Docling; `docling`
+      without the extra names the setting and the install command; and the startup check
+      builds the adapter rather than deferring to the first document.
 - [x] 5.3 `tests/support/docling_documents.py` — `DoclingDocument` fixtures built by hand,
       so every mapping decision is testable in milliseconds without model weights.
 - [x] 5.4 `tests/unit/infrastructure/docling/test_mapper.py` — reading order and rendering;
@@ -125,9 +131,11 @@ switched on in a deployed environment.
       CPU one — and independent of the queue's `batchSize`.
 - [ ] 6.4 Log kills distinctly from cooperative timeouts; a rising kill rate means the
       cooperative timeout is mis-tuned or admission control is too loose.
-- [ ] 6.5 Prefetch and verify model artifacts in the Dockerfile behind a build arg, with
-      pinned versions, `DOCLING_ARTIFACTS_PATH` as `ENV`, and `HF_HUB_OFFLINE=1` still
-      holding.
+- [ ] 6.5 Install the `docling` extra and prefetch its model artifacts in the Dockerfile
+      behind a build arg, with pinned versions, `DOCLING_ARTIFACTS_PATH` as `ENV`, and
+      `HF_HUB_OFFLINE=1` still holding. **Until this lands, `EXTRACTION_ADAPTER=docling`
+      is not deployable**: the image runs `uv sync --no-dev --locked` with no extras, so
+      the host refuses to start (§1.5) rather than serving an engine it does not have.
 - [ ] 6.6 Add build-args plumbing to `.github/workflows/container-build-acr.yml`, which
       accepts none today, and pass the arg through the delivery workflows that call it.
 - [ ] 6.7 Verify the image builds and starts with the extra off — unchanged size, no

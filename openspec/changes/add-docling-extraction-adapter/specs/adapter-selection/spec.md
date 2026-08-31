@@ -39,8 +39,13 @@ path for them is configured, and SHALL fail with a message naming that setting.
 
 #### Scenario: Failure surfaces at startup
 
-- **WHEN** the artifacts are missing and Docling is the configured engine
-- **THEN** the failure occurs while the container is starting, so the readiness probe does not report ready on a deployment that cannot extract
+- **WHEN** the configured extraction engine cannot be constructed for any reason
+- **THEN** the failure occurs while the process is starting rather than on the first document, so the readiness probe does not report ready on a deployment that cannot extract, and no queue message is dequeued, failed, redelivered and poisoned to discover it
+
+#### Scenario: Both entrypoints check
+
+- **WHEN** the queue-trigger host starts, as well as the HTTP app
+- **THEN** the same check runs, because extraction runs in the trigger and a host that cannot extract should not start
 
 #### Scenario: No silent substitution
 
@@ -49,5 +54,10 @@ path for them is configured, and SHALL fail with a message naming that setting.
 
 #### Scenario: Engine selected without its dependency
 
-- **WHEN** `EXTRACTION_ADAPTER` is `docling` in an image built without the optional dependency
-- **THEN** construction fails with an error stating that the image was built without Docling support, not with an import traceback
+- **WHEN** `EXTRACTION_ADAPTER` is `docling` in an environment where the optional dependency is not installed
+- **THEN** startup fails with an error naming the setting and the command that installs the extra, rather than with a bare `ModuleNotFoundError` for a transitive package name
+
+#### Scenario: The deployment image does not yet build the extra
+
+- **WHEN** `EXTRACTION_ADAPTER` is `docling` in the deployment image, which installs no optional extras
+- **THEN** the host fails to start with that error, so the engine is unusable-and-loud rather than usable-looking-and-broken, until the image is built with the extra and its model artifacts

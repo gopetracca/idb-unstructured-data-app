@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.config.settings import get_settings
-from src.container import Container
+from src.container import Container, verify_extraction_configuration
 from src.infrastructure.initialization import initialize_storage
 from src.presentation.http.exception_handlers import register_exception_handlers
 from src.presentation.http.middleware.max_body_size import MaxBodySizeMiddleware
@@ -105,6 +105,11 @@ async def lifespan(app: FastAPI):
     container = Container()
     container.wire()
     app.state.container = container
+
+    # Build the configured extraction engine before serving. A deployment that cannot
+    # extract should fail its readiness probe, not discover the problem one document at a
+    # time — see `verify_extraction_configuration`.
+    verify_extraction_configuration(container)
 
     # Initialize Azure storage containers/tables
     await initialize_storage()

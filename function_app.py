@@ -25,7 +25,7 @@ except Exception as _dd_exc:
 
 import azure.functions as func
 
-from src.container import Container
+from src.container import Container, verify_extraction_configuration
 from src.main import app as fastapi_app
 from src.presentation.queue.triggers.chunk_document_trigger import bp as chunk_document_bp
 from src.presentation.queue.triggers.ingest_into_db_trigger import bp as ingest_into_db_bp
@@ -38,6 +38,11 @@ configure_logging()
 # Initialize container and wire dependencies for queue triggers
 container = Container()
 container.wire()
+
+# The queue triggers are where extraction actually runs, so the same startup check the
+# HTTP app does belongs here too: a host that cannot extract should fail to start rather
+# than fail every message it is handed, twice, and then poison it.
+verify_extraction_configuration(container)
 
 # app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONYMOUS)

@@ -75,7 +75,12 @@ evidence behind it.
   guarantee needs a supervised subprocess the parent can kill, which this change
   deliberately does not build; see *Deferred* below.
 - **Optional dependency group.** `docling` (and its torch dependency) install under a
-  `docling` extra, so deployments that do not use it do not carry the image weight.
+  `docling` extra, so deployments that do not use it do not carry the image weight. The
+  deployment image builds no extras, so **`EXTRACTION_ADAPTER=docling` is not deployable
+  yet** — and rather than let that surface one document at a time inside a queue trigger,
+  the configured engine is constructed at startup, from both the HTTP lifespan and the
+  queue-trigger host. A host that cannot extract does not start, and the error names the
+  setting and the command that installs the extra.
 
 Out of scope: changing the default adapter; runtime shadow-mode / dual extraction;
 chunking, vectorization, or search behaviour; GPU inference; Docling's VLM pipelines.
@@ -126,7 +131,9 @@ evaluate the engine locally, which is what this change is for:
     rewritten.
 - **Affected code:**
   - `src/config/settings.py` — `EXTRACTION_ADAPTER`, `PERSIST_RAW_EXTRACTION`, `DoclingSettings`
-  - `src/container.py` — `_create_document_extractor_adapter` gains the branch
+  - `src/container.py` — `_create_document_extractor_adapter` gains the branch;
+    `verify_extraction_configuration` builds the engine at startup
+  - `src/main.py`, `function_app.py` — call that check before serving
   - `src/infrastructure/docling/adapter.py`, `mapper.py` — new
   - `src/core/entities/document_analysis.py` — `analysis_format` on `ExtractionMetadata`
   - `src/application/use_cases/process_document.py` — read the engine-neutral setting

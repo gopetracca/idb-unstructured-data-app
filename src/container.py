@@ -65,6 +65,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ExtractionConfigurationError(RuntimeError):
+    """Startup aborted because the configured extraction engine cannot be constructed."""
+
+
+def verify_extraction_configuration(container: "Container") -> None:
+    """Build the configured extraction adapter now, before anything is served.
+
+    Every provider here is lazy, so without this the first *document* is what discovers
+    that the image has no Docling in it or that its model artifacts are missing — inside a
+    queue trigger, whose message is then redelivered to a worker that will fail the same
+    way, twice, and then poison. The adapter-selection spec already says the failure
+    belongs at startup so the readiness probe never reports ready on a deployment that
+    cannot extract; this is the line that makes that true.
+
+    Constructing the Azure adapter is cheap and cannot fail — an unconfigured endpoint
+    falls back to the fake — so this is run for every engine rather than only for Docling,
+    and costs nothing when there is nothing to find.
+    """
+    container.document_extractor_adapter()
+
+
 def _create_document_extractor_adapter(settings: Settings) -> "DocumentExtractorPort":
     """Create the appropriate extraction adapter based on configuration.
 
@@ -92,7 +113,20 @@ def _create_document_extractor_adapter(settings: Settings) -> "DocumentExtractor
     # it can run. It is selected only when asked for by name — never as a fallback: a
     # missing Azure endpoint is no evidence that Docling's model artifacts are present.
     if settings.extraction_adapter == DOCLING_ADAPTER:
-        from src.infrastructure.docling.adapter import DoclingExtractionAdapter
+        try:
+            from src.infrastructure.docling.adapter import DoclingExtractionAdapter
+        except ImportError as error:
+            # The import itself is the check. Docling is an optional extra and the
+            # deployment image is built without it, so this is the expected failure for
+            # `EXTRACTION_ADAPTER=docling` in a deployed environment — and it has to name
+            # the remedy, because "No module named 'docling_core'" does not.
+            raise ExtractionConfigurationError(
+                "EXTRACTION_ADAPTER=docling, but Docling is not installed in this "
+                "environment. It ships as an optional extra that the deployment image "
+                "does not yet build with: install it locally with `uv sync --extra "
+                "docling` (and fetch its weights with `uv run docling-tools models "
+                "download`), or set EXTRACTION_ADAPTER=document_intelligence."
+            ) from error
 
         logger.debug("Using DoclingExtractionAdapter for document processing")
         return DoclingExtractionAdapter(settings=settings.docling)
