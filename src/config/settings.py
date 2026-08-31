@@ -1,5 +1,12 @@
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The extraction engines `EXTRACTION_ADAPTER` may name. The fake is not among them: it is
+# selected by `DOCUMENT_INTELLIGENCE_USE_FAKE`, which stays the one switch that turns every
+# adapter off for local development.
+DOCUMENT_INTELLIGENCE_ADAPTER = "document_intelligence"
+DOCLING_ADAPTER = "docling"
+EXTRACTION_ADAPTERS = frozenset({DOCUMENT_INTELLIGENCE_ADAPTER, DOCLING_ADAPTER})
 
 
 class FileUploadSettings(BaseSettings):
@@ -205,6 +212,59 @@ class DocumentIntelligenceSettings(BaseSettings):
             return False
         # Fallback: if the settings string is not recognized, treat as False
         return False
+
+
+class DoclingSettings(BaseSettings):
+    """Docling extraction configuration.
+
+    Docling runs in-process, so its limits are the container's rather than a service's.
+    The two that matter for correctness are `max_pages` and `max_file_size_bytes`: they
+    reject work before any model runs, which is the only bound that costs nothing.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="DOCLING_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # Where the layout and table-structure model artifacts live. Empty means "let Docling
+    # find or fetch them", which is right for a workstation and wrong for an egress-
+    # restricted deployment; that deployment sets the path and gets a construction-time
+    # failure instead of a hanging download.
+    artifacts_path: str = Field(
+        default="",
+        description="Directory holding prefetched Docling model artifacts",
+    )
+
+    do_ocr: bool = Field(
+        default=False,
+        description="Run OCR over the document. Off by default: it is the slowest stage "
+        "and only earns its cost on scanned input.",
+    )
+    do_table_structure: bool = Field(
+        default=True,
+        description="Recover table structure. On, because the canonical model's tables "
+        "are the reason to prefer a layout engine over a text extractor.",
+    )
+
+    max_pages: int = Field(
+        default=500,
+        ge=1,
+        description="Reject a document with more pages than this before converting it",
+    )
+    max_file_size_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        ge=1,
+        description="Reject a document larger than this before converting it",
+    )
+    document_timeout_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        description="Docling's own cooperative bound on one conversion",
+    )
 
 
 class EmbeddingSettings(BaseSettings):
@@ -641,6 +701,27 @@ class Settings(BaseSettings):
         default_factory=DocumentIntelligenceSettings
     )
 
+    # Docling settings
+    docling: DoclingSettings = Field(default_factory=DoclingSettings)
+
+    # Which engine the `convert` stage runs. Resolved by exact match — see
+    # `EXTRACTION_ADAPTERS` — because a mis-selected extraction engine changes the stored
+    # content of every document, where a mis-selected chunker only moves boundaries within
+    # a text both engines agree on.
+    extraction_adapter: str = Field(
+        default=DOCUMENT_INTELLIGENCE_ADAPTER,
+        description="Extraction engine: 'document_intelligence' (default) or 'docling'",
+    )
+
+    # Persist the verbatim engine response beside the extracted text. Engine-neutral: what
+    # is written differs by engine, whether it is written does not. Unset defers to the
+    # legacy `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT`, which deployed configuration
+    # already sets; setting this one explicitly wins.
+    persist_raw_extraction: bool | None = Field(
+        default=None,
+        description="Store the verbatim engine response as the run's analysis sidecar",
+    )
+
     # Chunking settings
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
 
@@ -683,6 +764,35 @@ class Settings(BaseSettings):
         description="Permit running with authentication disabled outside development "
         "(ALLOW_ANONYMOUS_AUTH). Never set this in a deployed environment.",
     )
+
+    @field_validator("extraction_adapter")
+    @classmethod
+    def _known_extraction_adapter(cls, value: str) -> str:
+        """Reject an unrecognised engine at startup rather than defaulting to one.
+
+        `CHUNKING_ADAPTER` is deliberately looser — anything that is not `chonkie` selects
+        LlamaIndex. Extraction is not: a typo that silently picked an engine would change
+        what every document's stored text *is*, and nothing downstream could tell.
+        """
+        normalised = (value or "").strip().lower()
+        if normalised not in EXTRACTION_ADAPTERS:
+            raise ValueError(
+                f"EXTRACTION_ADAPTER={value!r} is not a known extraction engine. "
+                f"Accepted values: {', '.join(sorted(EXTRACTION_ADAPTERS))}."
+            )
+        return normalised
+
+    @property
+    def raw_extraction_persisted(self) -> bool:
+        """Whether the run's verbatim engine response is stored beside its text.
+
+        The engine-neutral setting wins when it is set at all; otherwise the
+        Document-Intelligence-prefixed one still governs, because that is the name
+        deployed configuration uses today.
+        """
+        if self.persist_raw_extraction is not None:
+            return self.persist_raw_extraction
+        return self.document_intelligence.persist_raw_result
 
     @property
     def is_development(self) -> bool:

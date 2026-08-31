@@ -517,6 +517,14 @@ class ExtractionMetadata(BaseModel):
         description="Method used for extraction",
     )
     api_version: str = Field(default="2024-11-30", description="API version used")
+    analysis_format: str | None = Field(
+        default=None,
+        description=(
+            "Schema of the run's raw analysis sidecar — 'azure-document-intelligence-"
+            "analyze-result' or 'docling-document'. None reads as the former, which is "
+            "the only shape written before engines were selectable."
+        ),
+    )
 
     # What was preserved. A document extracted before structural preservation existed
     # has zero counts and `raw_analysis_stored` false, which is how it is told apart

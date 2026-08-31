@@ -24,13 +24,18 @@ and SHALL NOT treat an unrecognised value as a request for any particular engine
 
 ### Requirement: Docling Adapter Fails Fast On Missing Model Artifacts
 
-The system SHALL verify Docling's model artifacts are present when the adapter is
-constructed, and SHALL fail with a message naming the artifacts path.
+The system SHALL verify Docling's model artifacts when the adapter is constructed and a
+path for them is configured, and SHALL fail with a message naming that setting.
 
-#### Scenario: Artifacts missing
+#### Scenario: A configured artifacts path holds nothing
 
-- **WHEN** the Docling adapter is constructed and no model artifacts are found at `DOCLING_ARTIFACTS_PATH`
-- **THEN** construction fails with an error naming `DOCLING_ARTIFACTS_PATH` and the offline-artifact requirement, rather than deferring to a first conversion that would hang on a blocked download
+- **WHEN** the Docling adapter is constructed and `DOCLING_ARTIFACTS_PATH` names a directory that is absent or empty
+- **THEN** construction fails with an error naming `DOCLING_ARTIFACTS_PATH` and how to populate it, rather than deferring to a first conversion that would hang on a blocked download
+
+#### Scenario: No path configured
+
+- **WHEN** `DOCLING_ARTIFACTS_PATH` is unset
+- **THEN** Docling resolves the artifacts its own way, which is correct on a workstation and is why the setting exists for the environments where it is not
 
 #### Scenario: Failure surfaces at startup
 
@@ -41,3 +46,8 @@ constructed, and SHALL fail with a message naming the artifacts path.
 
 - **WHEN** the Docling adapter cannot be constructed
 - **THEN** no other adapter is substituted, in contrast with the Azure adapter's fallback to a fake, because a deployment that explicitly asked for Docling has not consented to synthetic text
+
+#### Scenario: Engine selected without its dependency
+
+- **WHEN** `EXTRACTION_ADAPTER` is `docling` in an image built without the optional dependency
+- **THEN** construction fails with an error stating that the image was built without Docling support, not with an import traceback

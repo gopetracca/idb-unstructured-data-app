@@ -2,14 +2,20 @@
 
 ## Context
 
-`DocumentIntelligencePort` has one real implementation and one fake. The port's shape —
-bytes plus content type in, `MarkdownOutput` out — is already engine-neutral, so adding a
-second engine is a question of whether a second engine can honestly fill that contract,
-not of restructuring the layers.
+`DocumentExtractorPort` has one real implementation and one fake. The port's shape — bytes
+plus content type in, `MarkdownOutput` out — is already engine-neutral, so adding a second
+engine is a question of whether a second engine can honestly fill that contract, not of
+restructuring the layers.
 
 This document is the evaluation that answers it, across the dimensions that decide whether
 Docling is usable here: downstream compatibility, extensibility, ease of use, speed, price,
 and the operational constraints this specific deployment imposes.
+
+**Scope.** What is built here is selection, the adapter, and the mapping — enough to run
+Docling locally and measure it against real documents. The image work and the hard
+termination guarantee are deferred, and this document keeps their analysis rather than
+deleting it, because deferring a decision is not the same as not having made one. Each
+deferred section says so in its first line.
 
 ## The comparison
 
@@ -33,44 +39,53 @@ Everything after extraction reads the stage's text output, located through the d
 
 - `chunk_document` reads exactly one key: `extracted_text`. Nothing else in the pipeline
   reads extraction output today.
-- Since `preserve-full-extraction-output` merged, that output also carries pages, tables,
-  figures, paragraphs with roles, sections, `TextSpan`s, and `BoundingRegion`s. This is
-  shipped code, so the target below is a real model rather than a planned one.
+- Since `provider-neutral-extraction-model` merged (PR #8), that output also carries the
+  canonical block list, tables partitioned for reuse, figures, paragraphs with roles, and
+  geometry labelled with its unit and origin. This is shipped code, so the target below is
+  a real model rather than a planned one.
 
 So compatibility reduces to: **can Docling fill the enriched `MarkdownOutput` without
 faking anything?** Field by field:
 
 | `MarkdownOutput` field | Docling source | Fidelity |
 | --- | --- | --- |
-| `extracted_text` | `DoclingDocument.export_to_markdown()` | Direct. Markdown dialect differs from Azure's — same information, different rendering |
+| `extracted_text` | rendered by the adapter, item by item in `iterate_items()` order | The adapter's own markdown. Dialect differs from Azure's — same information, different rendering |
+| `blocks` | one per rendered item, range recorded as it is written | Direct, and disjoint by construction: `iterate_items` does not descend into pictures and a table's cells are not items, so nothing encloses anything |
 | `pages[].page_number` | `PageItem` key | Direct |
 | `pages[].text` | items grouped by `prov[0].page_no` | Better than today's Azure mapping, which joins words with spaces and destroys line breaks |
 | `pages[].word_count` | derived | Direct |
 | `pages[]` geometry (width/height/unit) | `PageItem.size` | Direct; `unit` differs (Docling uses points) |
-| `tables` | `TableItem.data.grid`: `TableCell` with `start/end_row_offset_idx`, `start/end_col_offset_idx`, and `column_header` / `row_header` / `row_section` flags | Direct. Offsets convert to the domain's `row_index` / `column_index` / `row_span` / `column_span`, and the header flags to `kind` |
+| `tables` | `TableItem.data.table_cells` with `start/end_row_offset_idx`, `start/end_col_offset_idx`, and `column_header` / `row_header` / `row_section` flags | Direct. Offsets convert to `row_index` / `column_index` / `row_span` / `column_span`, and the three flags to `CellRole` |
+| `tables[].rendered` / `render_prefix` / `rows` / `render_suffix` | `TableItem.export_to_markdown()`, then `partition_pipe_table` | Direct. The partition splits a string the adapter already has, so the exactness rule holds by construction |
 | `figures` | `PictureItem` with `prov` | Direct |
 | `paragraphs[].role` | `DocItemLabel` (`section_header`, `caption`, `footnote`, `page_header`, `page_footer`, …) | Different vocabulary, same concept — needs an explicit mapping table, not a coincidental one |
 | `sections` | group hierarchy / heading levels | Derivable |
-| `spans` (offset into the markdown string) | **not native** | Docling anchors items to page coordinates, not to offsets in the exported markdown |
-| `bounding_regions` | `prov[].bbox` + `page_no` | Direct, but bottom-left origin vs Azure's top-left — must be normalised, not copied |
+| `spans` (offset into the markdown string) | **not native** | Docling anchors items to page coordinates. The *block* ranges are produced by the adapter as it renders; the provider-reported `spans` on paragraphs and styles stay empty |
+| `bounding_regions` / `BoundingBox` | `prov[].bbox` + `page_no` | Direct. Bottom-left origin and points, recorded as such rather than converted to Azure's top-left inches |
 | `styles` | no equivalent | Empty |
 | `key_value_pairs` | `key_value_region`, `field_key`, `field_value` labels exist, but items are not paired into key→value structures | Empty |
 | `extraction_confidence` | no per-word confidence | See below |
 
 Two genuine gaps, and neither is fatal:
 
-**Spans.** Azure gives character offsets into the markdown string, which is how you map a
-table back into `extracted_text`. Docling gives page geometry instead. The honest
-resolution is to leave `spans` empty for Docling rather than synthesise plausible offsets
-— a wrong offset is worse than an absent one, because a consumer cannot tell it is wrong.
-Consumers that need spans must check for them; consumers that need geometry get better
-data from Docling than from Azure.
+**Spans.** Azure gives character offsets into the markdown *it* returned. Docling returns
+no markdown at all, so there is nothing to offset into — which is precisely the case the
+port's offset invariant covers: the adapter renders the text itself and records the range
+as it writes each element. Every `ContentBlock` and every table therefore resolves against
+`extracted_text` exactly as Azure's do. What stays empty is the provider-reported `spans`
+on paragraphs and styles: those would be offsets into a string Docling never saw, and a
+wrong offset is worse than an absent one because a consumer cannot tell it is wrong.
+
+This is also why the adapter renders rather than calling `export_to_markdown()` on the
+whole document and locating each item in the result. Searching a rendering for the text
+that produced it is guesswork the moment a phrase repeats, and it would fail silently.
 
 **Confidence.** Azure's `extraction_confidence` is an average of per-word OCR confidences.
-Docling exposes a document-level confidence grade rather than per-word scores. Mapping a
-grade onto the same 0–1 float would make two incomparable numbers look comparable. The
-adapter reports Docling's own confidence where available and `analysis_format` says which
-engine produced it, so nobody compares the two by accident.
+Docling exposes a coarse document-level *grade* rather than per-word scores. Mapping a
+grade onto the same 0–1 float would make two incomparable numbers look comparable, so the
+adapter leaves the field at its default and `extraction_method` says which engine produced
+the output. A consumer reading 0.0 learns "not reported", which is true; a consumer reading
+a derived 0.75 would learn something false.
 
 The claim that the mapping is sound is checkable rather than asserted:
 `tests/support/table_reconstruction.assert_cells_tile_grid` takes an `ExtractedTable` and
@@ -78,9 +93,15 @@ requires its cells to tile `row_count × column_count` exactly once, merged span
 It names no Azure type, so it applies unchanged to a Docling-produced table. A mapping that
 drops a cell or mis-computes a span fails it.
 
-**Conclusion:** the contract holds. The two fields that cannot be filled are declared
-empty rather than approximated, and `extraction_method` plus `analysis_format` on every
-stored artifact make an adapter's output self-identifying.
+There is a stronger check than the table above, and it is the one that actually decides
+this: `tests/support/extractor_contract.py` states the canonical contract as executable
+assertions naming no engine, and the parameterised contract test runs them against every
+adapter. Docling is an entry in that list, so the claim "the contract holds" is a test
+result rather than a paragraph.
+
+**Conclusion:** the contract holds. What cannot be filled is declared empty rather than
+approximated, and `extraction_method` plus `analysis_format` on every stored artifact make
+an adapter's output self-identifying.
 
 ### Extensibility
 
@@ -183,6 +204,11 @@ carries no evidence that model artifacts are present.
 
 ## Decision: model artifacts are baked at build time and verified at construction
 
+**Deferred, except for the construction-time check, which is built.** The image and
+workflow work below is required before a deployed rollout and is not required to evaluate
+the engine on a workstation, where Docling resolves its own artifacts and
+`DOCLING_ARTIFACTS_PATH` is left unset.
+
 `HF_HUB_OFFLINE=1` and the restricted VNet mean a runtime model download does not fail
 fast — it hangs on a blocked connection. The repo has already been through this once with
 the chunker's tokenizer (AIA-416), and the resolution there is the precedent:
@@ -218,7 +244,19 @@ of its own, and they are build-pipeline work, not adapter work:
 there is no path for any build arg through the ACR workflow. Plumbing that through is a
 prerequisite for enabling the extra in a deployed image.
 
-## Decision: conversion runs in a killable process
+## Decision: conversion runs in a killable process — deferred, and labelled as such
+
+**Deferred.** What is built is the layered admission control, Docling's cooperative
+`document_timeout`, and a worker thread that keeps the event loop free. What is *not* built
+is the hard deadline. The analysis below is why, and it stands unchanged: the reason this
+section is kept rather than trimmed is that the cheap-looking alternative is wrong in a way
+that reads as correct, and a later reader reaching for `asyncio.wait_for` should find the
+argument already made.
+
+Until the subprocess exists, the adapter says plainly — in its module docstring, in the
+spec, and here — that its timeout is a bound and not a guarantee. That is the honest
+position. Presenting the thread as if it terminated the work would be the failure this
+whole section is about, dressed as a fix.
 
 A first draft of this change ran conversion in a thread executor and bounded it with
 `asyncio.wait_for`. That does not work, and it is worth writing down why, because the
@@ -280,6 +318,12 @@ queue's `batchSize: 4`. §0 has to measure per-worker RSS, not just per-page CPU
 assumption, not a verified fact, and §0 checks it before anything else in the design is
 worth building.
 
+**Until then, the exposure is real and bounded by admission control.** With no hard
+deadline, a document that overruns the queue's five-minute visibility timeout is
+redelivered while the first attempt is still converting. `DOCLING_MAX_PAGES` and the file
+size limit are what keep that from happening in practice, which is why they default
+conservatively — they are carrying weight the hard deadline is supposed to carry.
+
 **A terminated run publishes nothing.** The kill lands during conversion, before any blob
 is written, so a killed worker leaves no orphaned output and no partial publish — the
 document still resolves to the last completed run. The hard deadline's margin has to cover
@@ -292,7 +336,7 @@ fails and publishes nothing instead, so the last complete run stays current.
 
 ## Decision: the raw payload needs no new plumbing
 
-`preserve-full-extraction-output` carries the verbatim response on
+`provider-neutral-extraction-model` carries the verbatim response on
 `MarkdownOutput.raw_analysis: dict[str, Any] | None`, marked `exclude=True` so it never
 serialises into the text output, with the use case persisting it to that run's analysis
 sidecar. The
@@ -304,21 +348,24 @@ Azure-shaped, so the Docling adapter sets it with `DoclingDocument.export_to_dic
 the existing persistence path works unchanged. No port widening, no use-case change — the
 earlier draft of this proposal assumed both would be needed.
 
-What does need attention is the *setting* that gates it. `_store_raw_analysis` reads
+What does need attention is the *setting* that gates it. The use case read
 `get_settings().document_intelligence.persist_raw_result`, so with Docling configured, an
-engine-neutral behaviour is controlled by a setting whose name says Document Intelligence.
-The behaviour is correct; the name lies. An engine-neutral name should be introduced with
-the existing one still honoured, since it is presumably already set in deployed
-configuration.
+engine-neutral behaviour was controlled by a setting whose name says Document Intelligence.
+The behaviour was correct; the name lied. `PERSIST_RAW_EXTRACTION` is introduced and wins
+when set, with the existing name still honoured because it is presumably already set in
+deployed configuration.
 
 Two more fields are engine-coupled in the same quiet way. `extraction_method` defaults to
 `azure-document-intelligence` and `api_version` to a Document Intelligence version string.
 Left alone, a Docling extraction would be stamped with both — which is precisely the
-mixed-corpus ambiguity this change is supposed to remove.
+mixed-corpus ambiguity this change is supposed to remove, so the adapter sets both
+explicitly. The defaults stay, because they are what output written before engines were
+selectable actually came from.
 
 ## Decision: inherit the publication protocol, tag the payload
 
-`preserve-full-extraction-output` did not settle on fixed paths. Each run generates a
+`provider-neutral-extraction-model` and the change before it did not settle on fixed
+paths. Each run generates a
 `run_id` and writes `{tenant_id}/{file_id}/analysis/{run_id}.json` and
 `{tenant_id}/{file_id}/text/{run_id}.json`, publishes both references in a single
 `update_blob_references`, and sweeps what that update *reports* it displaced rather than
@@ -350,14 +397,18 @@ one artifact.
 
 Rejected — **normalise Docling into Azure's `AnalyzeResult` shape.** Fabricating a foreign
 schema loses exactly what a verbatim copy exists to preserve, and reintroduces the lossy
-filter that `preserve-full-extraction-output` was written to remove.
+filter that preserving the full extraction output was written to remove.
 
 ## Open questions
+
+All of these are inputs to the deferred deployment work, not to the adapter. None blocks
+running Docling locally, which is what this change delivers.
 
 - IADB's actual Document Intelligence commitment rate, without which the crossover volume
   cannot be computed.
 - Whether the Azure Functions Python worker permits long-lived subprocesses. The hard
-  deadline has no other mechanism, so a negative answer invalidates the design.
+  deadline has no other mechanism, so a negative answer invalidates that part of the design
+  and leaves admission control as the only bound.
 - Measured CPU seconds per page and peak RSS **per worker process** on representative IADB
   documents — decides Container Apps sizing, and the concurrency limit is set by memory
   rather than by CPU.

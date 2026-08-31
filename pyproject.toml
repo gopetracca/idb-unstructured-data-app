@@ -33,6 +33,11 @@ dependencies = [
     "pyjwt[crypto]>=2.8.0",
 ]
 
+[project.optional-dependencies]
+docling = [
+    "docling>=2.55.0",
+]
+
 [tool.uv]
 default-groups = ["dev"]
 

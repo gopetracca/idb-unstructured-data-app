@@ -39,7 +39,7 @@ from src.application.use_cases.vectorize_chunks import VectorizeChunksUseCase
 from src.application.use_cases.vectorize_chunks_and_enqueue_ingestion import (
     VectorizeChunksAndEnqueueIngestionUseCase,
 )
-from src.config.settings import Settings, get_settings
+from src.config.settings import DOCLING_ADAPTER, Settings, get_settings
 from src.infrastructure.azure.adapters.blob_store_adapter import BlobStoreAdapter
 from src.infrastructure.azure.adapters.document_intelligence_azure import (
     AzureDocumentIntelligenceAdapter,
@@ -68,8 +68,10 @@ logger = logging.getLogger(__name__)
 def _create_document_extractor_adapter(settings: Settings) -> "DocumentExtractorPort":
     """Create the appropriate extraction adapter based on configuration.
 
-    Returns FakeDocumentIntelligenceAdapter for local development (use_fake=True),
-    or AzureDocumentIntelligenceAdapter for production when configured.
+    Resolution order, and why it is this one: an explicit `DOCUMENT_INTELLIGENCE_USE_FAKE`
+    wins over everything, because it is the one switch that turns every adapter off for
+    local development; then `EXTRACTION_ADAPTER` names the engine; then Azure, if it is
+    configured; then the fake, with a warning. Docling appears only where it was named.
 
     Args:
         settings: Application settings
@@ -85,6 +87,15 @@ def _create_document_extractor_adapter(settings: Settings) -> "DocumentExtractor
         return FakeDocumentIntelligenceAdapter(
             simulated_delay_seconds=di_settings.simulated_delay_seconds,
         )
+
+    # Docling runs in-process, so nothing about the Azure configuration bears on whether
+    # it can run. It is selected only when asked for by name — never as a fallback: a
+    # missing Azure endpoint is no evidence that Docling's model artifacts are present.
+    if settings.extraction_adapter == DOCLING_ADAPTER:
+        from src.infrastructure.docling.adapter import DoclingExtractionAdapter
+
+        logger.debug("Using DoclingExtractionAdapter for document processing")
+        return DoclingExtractionAdapter(settings=settings.docling)
 
     # Use Azure adapter if credentials are configured
     if di_settings.is_configured:

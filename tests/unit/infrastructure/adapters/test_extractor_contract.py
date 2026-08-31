@@ -11,6 +11,7 @@ adapter is wrong or the contract is — and both are worth finding out before th
 ships rather than after a consumer depends on it.
 """
 
+from importlib.util import find_spec
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -68,10 +69,36 @@ async def fake_output() -> MarkdownOutput:
     )
 
 
-# Every adapter that exists. A Docling adapter joins this list and inherits the bar.
+async def docling_output() -> MarkdownOutput:
+    """The Docling mapper over a hand-built `DoclingDocument`.
+
+    The mapper, not the converter: the conversion needs several hundred megabytes of model
+    weights, and every promise this file checks is the mapper's. Running it against a
+    document built in memory is what keeps the default `pytest` run free of artifacts while
+    still holding the engine to the same bar.
+    """
+    from src.infrastructure.docling.mapper import map_document
+    from tests.support.docling_documents import build_sample_document
+
+    return map_document(build_sample_document(), file_id="contract-docling")
+
+
+# Every adapter that exists. A new one joins this list and inherits the bar.
+#
+# Docling is skipped rather than failed when its optional extra is absent: an image built
+# without it genuinely has no Docling adapter to hold to the contract, and pretending
+# otherwise would turn a build choice into a red test.
 ADAPTERS = [
     pytest.param(azure_output, id="azure-document-intelligence"),
     pytest.param(fake_output, id="fake"),
+    pytest.param(
+        docling_output,
+        id="docling",
+        marks=pytest.mark.skipif(
+            find_spec("docling_core") is None,
+            reason="the optional docling extra is not installed",
+        ),
+    ),
 ]
 
 adapters = pytest.mark.parametrize("build_output", ADAPTERS)

@@ -313,6 +313,10 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
+        "requires_docling_models: mark test as requiring Docling's model artifacts on disk",
+    )
+    config.addinivalue_line(
+        "markers",
         "end2end_http: mark test as end-to-end HTTP pipeline test requiring Azure credentials",
     )
     config.addinivalue_line(
@@ -339,6 +343,25 @@ def _docker_is_available() -> bool:
         return False
 
 
+def _docling_models_are_available() -> bool:
+    """Whether Docling and its model weights are both present.
+
+    The weights are hundreds of megabytes and are fetched, not vendored, so a default
+    `pytest` run must not need them: everything about the mapping is tested against a
+    `DoclingDocument` built in memory, and only the conversion itself is gated here.
+    """
+    from importlib.util import find_spec
+
+    if find_spec("docling") is None:
+        return False
+
+    from src.config.settings import get_settings as _get_settings
+
+    configured = (_get_settings().docling.artifacts_path or "").strip()
+    candidates = [Path(configured)] if configured else [Path.home() / ".cache/docling/models"]
+    return any(path.is_dir() and any(path.iterdir()) for path in candidates)
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip tests based on environment configuration."""
     # SQL Server tests run against a testcontainer, so they need a Docker daemon. Without
@@ -353,6 +376,14 @@ def pytest_collection_modifyitems(config, items):
         )
         for item in sqlserver_items:
             item.add_marker(skip_sqlserver)
+
+    if not _docling_models_are_available():
+        skip_docling = pytest.mark.skip(
+            reason="Docling model artifacts are absent; run `docling-tools models download`"
+        )
+        for item in items:
+            if "requires_docling_models" in item.keywords:
+                item.add_marker(skip_docling)
 
     # Skip Azurite tests if requested
     if os.getenv("SKIP_AZURITE_TESTS"):

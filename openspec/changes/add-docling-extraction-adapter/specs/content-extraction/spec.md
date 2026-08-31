@@ -20,7 +20,7 @@ choosing an engine by default.
 
 #### Scenario: Unrecognised engine
 
-- **WHEN** `EXTRACTION_ADAPTER` is set to any value other than `document_intelligence`, `docling`, or the fake selector
+- **WHEN** `EXTRACTION_ADAPTER` is set to any value other than `document_intelligence` or `docling`
 - **THEN** startup fails with an error naming `EXTRACTION_ADAPTER` and the values it accepts
 
 #### Scenario: Docling is never an implicit fallback
@@ -28,15 +28,25 @@ choosing an engine by default.
 - **WHEN** `DOCUMENT_INTELLIGENCE_ENDPOINT` is empty and `EXTRACTION_ADAPTER` is not `docling`
 - **THEN** the existing fake-adapter fallback applies unchanged, and Docling is not substituted, because a missing Azure endpoint is no evidence that Docling model artifacts are present
 
-### Requirement: Engine-Independent Extraction Output
+### Requirement: Every Engine Satisfies The Same Canonical Contract
 
-Every extraction engine SHALL produce the same `text.json` contract, and SHALL leave
-unavailable fields empty rather than approximating them.
+Every extraction engine SHALL produce output that satisfies the canonical extraction
+contract in full, and SHALL leave what it cannot fill empty rather than approximating it.
 
 #### Scenario: Contract satisfied by Docling
 
 - **WHEN** Docling extracts a document
-- **THEN** the run's text output carries `extracted_text`, per-page text, word counts and geometry, tables with cell row/column indices and header flags, figures, paragraphs with roles, sections, and per-item bounding regions, in the same shape the Azure adapter produces
+- **THEN** the run's text output carries blocks in reading order whose ranges resolve against `extracted_text`, tables with canonical cell roles and header rows derived from those cells, figures, paragraphs with the engine's own role preserved, per-page geometry, and bounding boxes — in the same shape the Azure adapter produces
+
+#### Scenario: The adapter renders when its engine reports no offsets
+
+- **WHEN** an engine returns a document tree rather than a rendered string
+- **THEN** the adapter renders the text itself and records each element's range as it writes, rather than searching a rendering for the text that produced it
+
+#### Scenario: A table's parts are exactly its whole, whichever markup it is in
+
+- **WHEN** an engine renders tables in a form the other does not
+- **THEN** the adapter partitions the rendering it produced into a prefix, body rows and a suffix, so a consumer composes a fragment by concatenation alone and never learns which form it got
 
 #### Scenario: Chunking is unaffected by the engine
 
@@ -45,13 +55,13 @@ unavailable fields empty rather than approximating them.
 
 #### Scenario: Fields with no engine equivalent
 
-- **WHEN** the engine has no equivalent for a field — markdown character spans and per-word confidence for Docling, for example
+- **WHEN** the engine has no equivalent for a field — character spans, visual styles, key-value pairs and a confidence probability, for Docling
 - **THEN** the field is empty or unset, and no substitute value is synthesised
 
-#### Scenario: Bounding regions normalised
+#### Scenario: Geometry is labelled, not converted
 
-- **WHEN** an engine reports page geometry in a different coordinate origin or unit than the stored contract declares
-- **THEN** the values are converted to the contract's convention and the unit is recorded, so regions from different engines are directly comparable
+- **WHEN** an engine reports page geometry in a different coordinate origin or unit than another engine does
+- **THEN** the values are stored as reported, with their unit and origin recorded, so that a consumer comparing geometry across engines can see the difference rather than have it silently converted away
 
 ### Requirement: Extraction Output Identifies Its Engine
 
@@ -61,7 +71,7 @@ analysis uses, so a mixed corpus is unambiguous.
 #### Scenario: Engine recorded
 
 - **WHEN** extraction succeeds
-- **THEN** `extraction_metadata.extraction_method` names the engine that ran, not a fixed default
+- **THEN** `extraction_metadata.extraction_method` names the engine that ran, and `api_version` the version of that engine, rather than a fixed default
 
 #### Scenario: Raw analysis schema recorded
 
@@ -77,6 +87,27 @@ analysis uses, so a mixed corpus is unambiguous.
 
 - **WHEN** a text output has no `analysis_format`
 - **THEN** it is read as Azure Document Intelligence output and no error is raised
+
+### Requirement: Raw-Analysis Persistence Is Engine-Neutral
+
+Whether a run's verbatim engine response is stored SHALL be a property of the extraction
+stage rather than of any one engine, and existing deployed configuration SHALL keep
+working.
+
+#### Scenario: Engine-neutral setting governs
+
+- **WHEN** `PERSIST_RAW_EXTRACTION` is set
+- **THEN** it decides whether the sidecar is written, whichever engine ran
+
+#### Scenario: The existing name is still honoured
+
+- **WHEN** `PERSIST_RAW_EXTRACTION` is unset and `DOCUMENT_INTELLIGENCE_PERSIST_RAW_RESULT` is set
+- **THEN** the latter still governs, because that is the name deployed configuration already uses
+
+#### Scenario: Both set
+
+- **WHEN** both are set and they disagree
+- **THEN** the engine-neutral setting wins
 
 ### Requirement: Engine Choice Does Not Weaken Output Publication
 
@@ -98,71 +129,46 @@ contract unchanged, and SHALL NOT introduce a path any reader is expected to gue
 - **WHEN** a run publishes its outputs
 - **THEN** both references move in one update, so the row never holds a text output from one run beside a raw analysis from another, whichever engine produced them
 
-#### Scenario: A failed or terminated run publishes nothing
+#### Scenario: A failed run publishes nothing
 
-- **WHEN** a conversion fails, times out, or is terminated at its hard deadline
+- **WHEN** a conversion fails or is cut short
 - **THEN** nothing is published, only that run's own outputs are discarded, and the previously published pair remains referenced and intact
-
-### Requirement: In-Process Conversion Is Terminable
-
-In-process extraction SHALL run where it can be forcibly terminated, and the system SHALL
-guarantee that a conversion has stopped consuming CPU before the queue can redeliver its
-message. Cancelling an awaitable SHALL NOT be relied on as the termination mechanism.
-
-#### Scenario: Hard deadline terminates the work
-
-- **WHEN** a conversion is still running at its hard deadline
-- **THEN** the execution context running it is killed, its CPU and memory are reclaimed, and the `convert` stage is marked failed with reason `conversion_timeout`
-
-#### Scenario: Termination does not depend on the conversion cooperating
-
-- **WHEN** a conversion is inside an operation that never checks for cancellation, such as a single model inference
-- **THEN** it is still terminated at the hard deadline, so the guarantee does not rest on the conversion library yielding control
-
-#### Scenario: No overlap with a redelivered message
-
-- **WHEN** the hard deadline is configured
-- **THEN** it leaves enough of the queue visibility timeout for the stage's remaining work — the run-scoped analysis and text writes, the reference publication, and the sweep of what it displaced — to finish, so no conversion is ever running at the moment its own message becomes visible again
-
-#### Scenario: Termination is proven, not assumed
-
-- **WHEN** the termination path is tested
-- **THEN** a conversion that ignores cooperative cancellation is shown to have actually stopped within the deadline, rather than the test only asserting that the awaiting call returned
-
-#### Scenario: A killed conversion does not take the worker with it
-
-- **WHEN** a conversion is terminated, or dies on its own from memory exhaustion
-- **THEN** the trigger records the stage failure and the worker continues serving health probes and subsequent messages
 
 ### Requirement: Layered Conversion Limits
 
-The system SHALL reject work it cannot finish before starting it, and SHALL bound work in
-progress, so that forced termination is the last resort rather than the normal path.
+In-process extraction SHALL reject work it cannot finish before starting it, and SHALL
+bound the conversion once started. The system SHALL state which of those limits is a
+guarantee and which is not.
 
 #### Scenario: Document too large to attempt
 
-- **WHEN** a document exceeds `DOCLING_MAX_PAGES` or the configured maximum file size
-- **THEN** the stage fails immediately with reason `page_limit_exceeded` or `file_size_limit_exceeded`, before conversion starts
+- **WHEN** a document exceeds the configured maximum file size
+- **THEN** the stage fails immediately with reason `file_size_limit_exceeded`, before conversion starts and before any model runs
+
+#### Scenario: Page limit applied as the document is opened
+
+- **WHEN** a document exceeds `DOCLING_MAX_PAGES`
+- **THEN** the conversion does not complete and the stage fails, rather than the document being converted and truncated
 
 #### Scenario: Cooperative timeout bounds overshoot
 
 - **WHEN** a conversion exceeds the engine's own document timeout
-- **THEN** the engine stops at its next checkpoint and the stage fails with reason `conversion_timeout`, without waiting for the hard deadline
+- **THEN** the engine stops at its next checkpoint and the stage fails
 
-#### Scenario: Cooperative timeout is set below the hard deadline
+#### Scenario: The cooperative bound is not presented as a guarantee
 
-- **WHEN** both limits are configured
-- **THEN** the engine's own timeout is the shorter, so the ordinary slow document ends cooperatively and forced termination is reserved for the case where that fails
+- **WHEN** a conversion is inside an operation that never checks for cancellation, such as a single model inference
+- **THEN** the timeout does not stop it, and this is documented rather than implied otherwise — a hard deadline requires an execution context that can be killed, which is deferred
 
 #### Scenario: Partial results are not stored as complete
 
 - **WHEN** a conversion reports partial success because a limit was reached
 - **THEN** the stage fails and publishes nothing, so no document is silently indexed on incomplete text and the previously published pair stays current
 
-#### Scenario: Concurrency is bounded by memory, not by the queue
+#### Scenario: The event loop keeps serving
 
-- **WHEN** conversions run concurrently
-- **THEN** the number in flight is limited by configuration sized against per-conversion memory, independently of the queue batch size
+- **WHEN** a CPU-bound conversion is in progress
+- **THEN** it runs off the event loop, so the worker continues answering health probes
 
 ### Requirement: Docling Supported Formats
 
