@@ -1,7 +1,10 @@
 # Structure-aware chunking
 
-> Depends on `provider-neutral-extraction-model`. This change consumes the canonical
-> block list that one introduces; it should not be implemented before it.
+> Depends on `provider-neutral-extraction-model`, which has **shipped** — see
+> `openspec/changes/archive/provider-neutral-extraction-model/`, and the requirements it
+> folded into `specs/content-extraction/`. The canonical block list, `ExtractedTable.rendered`
+> and the `render_prefix` / `rows` / `render_suffix` partition this change consumes all
+> exist now, so it is unblocked.
 
 ## Why
 

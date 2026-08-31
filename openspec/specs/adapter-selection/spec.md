@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Choose, at composition time, which implementation backs each port — the real Azure
+Choose, at composition time, which implementation backs each port — a real service
 adapter, a deterministic fake, or (for chunking) one of two real libraries — from
 settings alone, so no application or domain code knows which is in play. This is also
 where the system's riskiest configuration behaviour lives: an unconfigured Azure
@@ -39,6 +39,30 @@ embeddings, selectable per adapter, so the pipeline can run with no Azure depend
 
 - **WHEN** the fake document intelligence adapter runs
 - **THEN** it applies the configured simulated delay, so timing-sensitive behaviour is still exercised
+
+### Requirement: Extraction Adapters Are Interchangeable
+
+The extraction port SHALL be defined in provider-neutral terms, so that adding an
+extraction service is an adapter and not a change to any consumer.
+
+#### Scenario: The port names no provider
+
+- **WHEN** the extraction port is read
+- **THEN** its types and its vocabulary are canonical, and no application or presentation
+  code refers to a specific extraction service
+
+#### Scenario: A second extractor changes no consumer
+
+- **WHEN** an extraction adapter for a different service is added and selected
+- **THEN** the chunking, vectorization, ingestion, and search stages require no change,
+  because they consume only the canonical output
+
+#### Scenario: The fake adapter satisfies the same contract
+
+- **WHEN** `DOCUMENT_INTELLIGENCE_USE_FAKE` is true
+- **THEN** the fake adapter emits the canonical output — blocks, canonical cell roles,
+  header rows, and rendered table text — so that local runs exercise the contract rather
+  than a simplification of it
 
 ### Requirement: Silent Fallback To Fakes When Azure Is Unconfigured
 
